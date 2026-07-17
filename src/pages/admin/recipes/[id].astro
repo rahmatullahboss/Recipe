@@ -1,0 +1,109 @@
+---
+import BaseLayout from "../../../layouts/BaseLayout.astro";
+import { CSRF_COOKIE, createCsrfToken, createRandomToken, getCsrfCookieOptions } from "../../../lib/auth";
+import { getEditorialRecipe, getRecipeSubmissionReadiness } from "../../../lib/recipe-submissions";
+
+const recipeId = Astro.params.id ?? "";
+if (!Astro.locals.user || !Astro.locals.session) {
+  return Astro.redirect(`/login?next=${encodeURIComponent(`/admin/recipes/${recipeId}`)}`, 302);
+}
+const editorial = Astro.locals.user.role === "editor" || Astro.locals.user.role === "admin";
+if (!editorial) Astro.response.status = 403;
+const readiness = getRecipeSubmissionReadiness();
+const detail = editorial && readiness.database ? await getEditorialRecipe(recipeId) : null;
+if (editorial && readiness.database && !detail) Astro.response.status = 404;
+
+let csrfToken = "";
+if (editorial && detail) {
+  let nonce = Astro.cookies.get(CSRF_COOKIE)?.value;
+  if (!nonce) {
+    nonce = createRandomToken(18);
+    Astro.cookies.set(CSRF_COOKIE, nonce, getCsrfCookieOptions(Astro.request));
+  }
+  csrfToken = await createCsrfToken("recipe-editorial", nonce);
+}
+const sessionCsrf = Astro.locals.session.csrfToken;
+const recipe: any = detail?.recipe;
+const publishReady = recipe?.status === "review" && recipe?.media_upload_status === "uploaded" && recipe?.media_moderation_status === "approved";
+---
+
+<BaseLayout title="Recipe Review — Ozzyl Recipes" description="Review a private contributor recipe before publication." robots="noindex,nofollow">
+  <section class="section section--soft">
+    <div class="container">
+      <p class="eyebrow">Editorial operations</p>
+      <h1 class="section-title">{recipe?.title || "Recipe review"}</h1>
+      {recipe && <p class="section-copy">Submitted by {recipe.author_name} · {recipe.country_code} · {recipe.language_code} · revision {recipe.revision}</p>}
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container editorial-review" data-recipe-editorial data-recipe-id={recipeId} data-revision={recipe?.revision ?? ""} data-csrf={csrfToken} data-session-csrf={sessionCsrf}>
+      {!editorial ? (
+        <div class="auth-alert auth-alert--error"><strong>Editorial permission required.</strong></div>
+      ) : !readiness.database ? (
+        <div class="auth-alert"><strong>D1 editorial storage is unavailable.</strong></div>
+      ) : !detail || !recipe ? (
+        <div class="moderation-empty"><h2>Recipe submission not found</h2></div>
+      ) : (
+        <>
+          <div class="editorial-review__grid">
+            <article class="editor-section">
+              <p class="eyebrow">{recipe.status}</p>
+              <h2>{recipe.title}</h2>
+              <p><strong>{recipe.summary}</strong></p>
+              {recipe.description && <p>{recipe.description}</p>}
+              <dl class="moderation-meta">
+                <div><dt>Prep</dt><dd>{recipe.prep_minutes} min</dd></div>
+                <div><dt>Cook</dt><dd>{recipe.cook_minutes} min</dd></div>
+                <div><dt>Servings</dt><dd>{recipe.servings}</dd></div>
+                <div><dt>Difficulty</dt><dd>{recipe.difficulty}</dd></div>
+                <div><dt>Measurements</dt><dd>{recipe.measurement_system}</dd></div>
+                <div><dt>Slug</dt><dd>{recipe.slug}</dd></div>
+              </dl>
+              <p><strong>Categories:</strong> {(detail.categories as any[]).map((category) => category.name).join(", ")}</p>
+            </article>
+
+            <aside class="editor-section">
+              {recipe.r2_key ? <img class="editorial-review__image" src={`/media/${recipe.r2_key}?preview=1`} alt={recipe.alt_text || "Private recipe image preview"} /> : <div class="moderation-empty">No hero image</div>}
+              <p><strong>Image status:</strong> {recipe.media_moderation_status || "missing"}</p>
+              <p>{recipe.alt_text || "No alternative text."}</p>
+              <a class="button button--ghost" href="/admin/media">Open media moderation</a>
+            </aside>
+          </div>
+
+          <div class="editorial-review__grid">
+            <section class="editor-section">
+              <h2>Ingredients</h2>
+              <ul>{(detail.ingredients as any[]).map((item) => <li>{[item.amount, item.unit, item.item].filter(Boolean).join(" ")}{item.note ? ` — ${item.note}` : ""}</li>)}</ul>
+            </section>
+            <section class="editor-section">
+              <h2>Directions</h2>
+              <ol>{(detail.steps as any[]).map((step) => <li>{step.instruction}{step.timer_seconds ? ` (${Math.round(step.timer_seconds / 60)} min)` : ""}</li>)}</ol>
+            </section>
+          </div>
+
+          {recipe.status === "review" && (
+            <section class="editor-section">
+              <h2>Editorial decision</h2>
+              <label class="editor-field"><span>Decision note</span><textarea data-editorial-reason maxlength="1000" placeholder="Required when archiving. Optional publication note."></textarea></label>
+              <div class="editor-actions">
+                <button class="button" type="button" data-editorial-action="publish" disabled={!publishReady}>Publish recipe</button>
+                <button class="recipe-tool-button" type="button" data-editorial-action="archive">Archive submission</button>
+              </div>
+              {!publishReady && <p class="auth-help">Publishing remains blocked until the attached hero image is uploaded and approved.</p>}
+              <p class="moderation-result" data-editorial-result aria-live="polite"></p>
+            </section>
+          )}
+
+          <section class="editor-section">
+            <h2>Editorial history</h2>
+            <ol class="editorial-events">
+              {(detail.events as any[]).map((event) => <li><strong>{event.next_status}</strong> by {event.actor_name} · revision {event.revision}{event.reason ? ` — ${event.reason}` : ""}</li>)}
+            </ol>
+          </section>
+        </>
+      )}
+    </div>
+  </section>
+  <script src="/scripts/recipe-editorial.js" defer></script>
+</BaseLayout>
