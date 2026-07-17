@@ -18,7 +18,7 @@ on:
         default: false
         type: boolean
       enable_recipe_submissions:
-        description: Open atomic D1 recipe submissions and editorial publishing after media review is tested
+        description: Open D1 recipe submissions, requested changes, revisions, and publishing after media review is tested
         required: true
         default: false
         type: boolean
@@ -188,6 +188,10 @@ jobs:
             if (health.recipeSubmissions?.enabled !== expectRecipeSubmissions) failures.push("recipe submission flag does not match the workflow input");
             if (expectRecipeSubmissions && health.recipeSubmissions?.ready !== true) failures.push("recipe submissions are not ready");
             if (expectRecipeSubmissions && expectMediaUploads !== true) failures.push("recipe submissions were requested without media uploads");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.contributorRevisions !== true) failures.push("contributor recipe revisions are not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.requestedChanges !== true) failures.push("editor requested changes are not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.immutableSnapshots !== true) failures.push("immutable recipe snapshots are not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.optimisticLocking !== true) failures.push("recipe optimistic locking is not available");
             if (failures.length) {
               console.error(failures.join("\n"));
               process.exit(1);
