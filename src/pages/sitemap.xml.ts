@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { listRecipes } from "../lib/db";
+import { listCategories, listRecipes } from "../lib/db";
 import { markets } from "../lib/market";
 
 function escapeXml(value: string): string {
@@ -17,14 +17,19 @@ function escapeXml(value: string): string {
 
 export const GET: APIRoute = async ({ request }) => {
   const origin = new URL(request.url).origin;
-  const recipes = await listRecipes({ country: "US", limit: 48 });
+  const [recipes, categories] = await Promise.all([
+    listRecipes({ country: "US", limit: 48 }),
+    listCategories(100),
+  ]);
   const paths = [
     "/",
     "/search",
+    "/categories",
     "/markets",
     "/about",
     "/privacy",
     ...markets.map((market) => `/markets/${market.code.toLowerCase()}`),
+    ...categories.map((category) => `/categories/${category.slug}`),
     ...recipes.map((recipe) => `/recipes/${recipe.slug}`),
   ];
 
