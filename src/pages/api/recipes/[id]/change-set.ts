@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 import { CSRF_COOKIE, consumeRateLimit, isSameOriginRequest, validateCsrfToken } from "../../../../lib/auth";
+import { isEditorControlledPublishedChangeSetDraft } from "../../../../lib/editor-recipe-change-sets";
 import {
   cancelPublishedRecipeChangeSet,
   savePublishedRecipeChangeSet,
@@ -70,6 +71,9 @@ export const POST: APIRoute = async ({ request, cookies, locals, params }) => {
     const expectedRevision = Number(input.expectedRevision);
     if (!Number.isInteger(expectedRevision) || expectedRevision < 1) {
       return json({ ok: false, error: "Change-set revision is invalid." }, 422);
+    }
+    if (await isEditorControlledPublishedChangeSetDraft(changeSetId)) {
+      return json({ ok: false, error: "This private draft is currently controlled by the editorial team and has not been handed to the contributor." }, 403);
     }
 
     if (action === "cancel") {
