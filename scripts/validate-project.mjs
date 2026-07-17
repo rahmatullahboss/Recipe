@@ -138,15 +138,18 @@ async function validateMigrations() {
     assert(coverage.includes(`'${code}'`), `Market coverage migration is missing ${code}.`);
   }
 
-  const auth = await readFile(path.join(migrationDirectory, "0004_auth_security.sql"), "utf8");
+  const auth = await readFile(path.join(migrationDirectory, "0004_auth_accounts.sql"), "utf8");
   for (const field of [
     "email_verified_at",
-    "status",
+    "pending_verification",
     "auth_version",
     "password_changed_at",
     "last_login_at",
     "failed_login_count",
     "locked_until",
+    "auth_tokens",
+    "auth_audit_events",
+    "idx_users_email_nocase",
   ]) {
     assert(auth.includes(field), `Authentication migration is missing ${field}.`);
   }
@@ -159,6 +162,9 @@ async function validateAuthFoundation() {
   assert(source.includes("https://challenges.cloudflare.com/turnstile/v0/siteverify"), "Turnstile Siteverify integration is missing.");
   assert(source.includes("validateCsrfToken"), "Signed CSRF validation is missing from the authentication foundation.");
   assert(source.includes("constantTimeEqual"), "Constant-time credential comparison is missing.");
+
+  const modularCrypto = await readFile(path.join(root, "src", "lib", "auth", "crypto.ts"), "utf8");
+  assert(modularCrypto.includes("PASSWORD_ITERATIONS = 600_000"), "Modular auth crypto work factor was reduced below the approved baseline.");
 
   const middleware = await readFile(path.join(root, "src", "middleware.ts"), "utf8");
   assert(middleware.includes("https://challenges.cloudflare.com"), "Content Security Policy does not allow the Turnstile origin.");
