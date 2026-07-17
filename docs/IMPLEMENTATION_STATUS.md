@@ -16,7 +16,7 @@ Read [`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md) for authoritative continuation c
 | Contributor private change sets for published recipes | Complete in code | Disabled |
 | Editor-authored private change sets | Complete in code | Disabled |
 | Historical snapshot restoration into private proposals | Complete in code | Disabled |
-| Rich three-way conflict assistance | Not implemented | Not available |
+| Three-way conflict comparison and audited private rebase | Complete in code | Disabled |
 | Community/account synchronization | Not implemented | Not available |
 
 The public product remains D1-free. Trusted writes were not activated.
@@ -27,7 +27,7 @@ The public product remains D1-free. Trusted writes were not activated.
 
 - Astro 7 SSR on Cloudflare Workers
 - Ten initial international markets and D1-free fallback catalogue
-- Market-aware search/API, taxonomy pages, structured data, sitemap, robots, and real 404s
+- Market-aware search/API, taxonomy pages, structured data, sitemap, robots, and real 404 responses
 - Serving scaling, measurement conversion, print, copy link, saves, shopping list, meal plan, and guided cooking
 - Manifest, service worker, offline fallback, and private/API/media cache exclusions
 
@@ -98,6 +98,48 @@ Implemented behavior:
 
 See [`EDITOR_RECIPE_CHANGE_SETS.md`](EDITOR_RECIPE_CHANGE_SETS.md).
 
+### Three-way conflict assistance and private rebasing
+
+Migration `0012_recipe_change_set_rebases` adds immutable audited private rebases.
+
+The comparator reconstructs and validates:
+
+```text
+stored baseline
+current normalized live recipe
+private proposed recipe
+```
+
+Every recipe unit is classified as:
+
+```text
+unchanged
+proposal_only
+live_only
+same_change
+conflict
+```
+
+Implemented behavior:
+
+- Proposal-only values carry forward automatically.
+- Live-only values use the current live value.
+- Equal changes collapse to the current live value.
+- Every true conflict requires explicit `live` or `proposed` selection.
+- Categories are compared as a set.
+- Categories, ingredients, and directions remain atomic units; unsafe item-level merge inference is not attempted.
+- Contributor-created drafts are controlled by their owner.
+- Origin-backed editor drafts are controlled by editor/admin accounts.
+- Any `changes_requested` proposal is handed to the recipe owner.
+- A proposal in `review` is read-only and may only be handed back through a reviewer request-changes action.
+- Rebase repeats canonical content, categories, owner-media, checksum, derivative-policy, required-variant, assignment, and reservation validation.
+- One D1 batch updates only the private base/proposal/revision and inserts immutable before/live/after audit snapshots.
+- A D1 trigger requires the audit row to match the resulting private state.
+- Rebase never approves or changes live recipe content.
+- Existing exact-base approval guards remain unchanged, so stale approval stays impossible.
+
+See [`RECIPE_CHANGE_SET_CONFLICTS.md`](RECIPE_CHANGE_SET_CONFLICTS.md).
+
 ## Authoritative migrations
 
 ```text
@@ -112,6 +154,7 @@ migrations/d1/0008_media_derivatives/migration.sql
 migrations/d1/0009_recipe_publication_workflow/migration.sql
 migrations/d1/0010_published_recipe_change_sets/migration.sql
 migrations/d1/0011_editor_change_set_origins/migration.sql
+migrations/d1/0012_recipe_change_set_rebases/migration.sql
 ```
 
 Wrangler applies only the nested sequence through `migrations_pattern`. Root SQL files remain legacy references.
@@ -125,46 +168,47 @@ MEDIA_UPLOADS_ENABLED=false
 RECIPE_SUBMISSIONS_ENABLED=false
 ```
 
-No D1 activation, account provisioning, upload, real moderation, recipe creation, private change-set operation, historical restoration, scheduling, publication, deployment, merge, or production change occurred.
+No D1 activation, account provisioning, upload, real moderation, recipe creation, private change-set operation, historical restoration, private rebase, scheduling, publication, deployment, merge, or production change occurred.
 
 ## Validation baseline
 
 Implementation head:
 
 ```text
-c651f235dc40387e852ae0de1e865df746731fb7
+b2a249a903b66164f36f9ccde0894c77b088e457
 ```
 
-GitHub Actions CI run `#356` passed:
+GitHub Actions CI run `#374` passed:
 
 - checkout and Node.js 24 setup;
 - locked dependency installation;
-- catalogue/security/editor-change-set validator;
+- catalogue/security/conflict validator;
 - operational script validation;
-- all eleven migrations on fresh local D1 state;
+- all twelve migrations on fresh local D1 state;
 - D1-free Worker build;
 - D1 Worker build.
 
-Documentation commits may move the current branch head. Always fetch PR `#1` before continuing.
+Documentation and navigation commits may move the current branch head. Always fetch PR `#1` before continuing.
 
 ## Important routes
 
-- `/account/submissions/:id/change-set` — owner proposal editor/status and read-only editor-draft view
-- `POST /api/recipes/:id/change-set` — contributor create/save/submit/cancel, with editor-draft lock
-- `/admin/recipe-change-sets` — review queue and published-recipe proposal launcher
-- `/admin/recipe-change-sets/:id` — baseline/proposal comparison, audit, request changes, approval, or closure
+- `/account/submissions/:id/change-set` — owner proposal editor/status, stale lock, and read-only editor-draft view
+- `/account/change-sets/:id/conflicts` — private baseline/live/proposal report and controller-only rebase
+- `POST /api/recipes/:id/change-set` — contributor create/save/submit/cancel, with editor-draft and stale-base guards
+- `POST /api/recipe-change-sets/:id/rebase` — guarded audited private rebase
+- `/admin/recipe-change-sets` — review queue, proposal launcher, and conflict links
+- `/admin/recipe-change-sets/:id` — baseline/live/proposal review, conflict handoff, audit, approval, or closure
 - `/admin/recipes/:id/change-set` — editor current-live/historical private workspace
 - `POST /api/recipes/:id/editor-change-set` — editor create/restore/save/submit/cancel
-- `POST /api/recipe-change-sets/:id/editorial` — shared request-changes/approve/cancel path
+- `POST /api/recipe-change-sets/:id/editorial` — conflict handoff/request-changes, approve, or cancel
 - `POST /api/recipes/:id/editorial` — initial submission publication workflow
 - `POST /api/recipes/scheduled/process` — guarded manual due processor
 
 ## Remaining work
 
-1. Execute controlled non-production acceptance for all account/media/derivative/submission/revision/schedule/archive/contributor-editor-change-set/historical-restore/concurrency/rollback cases.
-2. Add richer three-way conflict comparison or merge assistance without weakening optimistic rejection.
-3. Add optional Cloudflare Cron/queue execution only after manual processor acceptance and incident procedures.
-4. Approve legal, retention, moderation, verification-email, deletion, and incident operations.
-5. Add synchronized saves, shopping lists, meal plans, ratings, reviews, comments, and collections.
-6. Add password reset, email change, account deletion, and administration interfaces.
-7. Add taxonomy/localization/nutrition administration, search indexing, recommendations, analytics, and advertising controls.
+1. Execute controlled non-production acceptance for all account/media/derivative/submission/revision/schedule/archive/contributor-editor-change-set/historical-restore/private-rebase/concurrency/rollback cases.
+2. Add optional Cloudflare Cron/queue execution only after manual processor acceptance and incident procedures.
+3. Approve legal, retention, moderation, verification-email, deletion, and incident operations.
+4. Add synchronized saves, shopping lists, meal plans, ratings, reviews, comments, and collections.
+5. Add password reset, email change, account deletion, and administration interfaces.
+6. Add taxonomy/localization/nutrition administration, search indexing, recommendations, analytics, and advertising controls.
