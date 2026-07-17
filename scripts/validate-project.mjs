@@ -41,6 +41,7 @@ async function validateMigrations() {
     "0009_recipe_publication_workflow",
     "0010_published_recipe_change_sets",
     "0011_editor_change_set_origins",
+    "0012_recipe_change_set_rebases",
   ];
   const actual = (await readdir(directory, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory())
@@ -55,73 +56,22 @@ async function validateMigrations() {
     assert(source.trim().length > 0 && source.includes(";"), `Invalid migration: ${name}.`);
   }
 
-  for (const token of ["recipe_localizations", "recipe_nutrition", "media_assets"]) {
-    assert(sql.get("0001_initial")?.includes(token), `Initial migration is missing ${token}.`);
-  }
-  for (const token of ["auth_tokens", "user_consents", "auth_audit_events", "idx_users_email_nocase"]) {
-    assert(sql.get("0004_auth_accounts")?.includes(token), `Auth migration is missing ${token}.`);
-  }
-  for (const token of ["media_upload_intents", "media_moderation_events", "moderation_status", "storage_etag", "8388608"]) {
-    assert(sql.get("0005_media_pipeline")?.includes(token), `Media migration is missing ${token}.`);
-  }
-  for (const token of ["media_asset_id", "revision", "recipe_editorial_events", "recipes_record_initial_review_submission", "recipes_record_editorial_transition"]) {
-    assert(sql.get("0006_recipe_editorial")?.includes(token), `Editorial migration is missing ${token}.`);
-  }
-  for (const token of ["content_revision", "change_requested_at", "revision_write_token", "recipe_revision_snapshots", "initial_submission", "resubmission"]) {
-    assert(sql.get("0007_recipe_revisions")?.includes(token), `Recipe revision migration is missing ${token}.`);
-  }
-  for (const token of [
-    "media_derivative_jobs",
-    "media_derivatives",
-    "source_orientation",
-    "normalized_width",
-    "generation_token",
-    "policy_version",
-    "source_sha256",
-    "cleanup_pending",
-    "media_assets_derivatives_regenerate_after_source_change",
-  ]) {
-    assert(sql.get("0008_media_derivatives")?.includes(token), `Media derivative migration is missing ${token}.`);
-  }
-  for (const token of [
-    "scheduled_publish_at",
-    "scheduled_by",
-    "schedule_revision",
-    "archived_at",
-    "restored_at",
-    "recipe_publication_events",
-    "scheduled_published",
-    "idx_recipes_scheduled_publication",
-  ]) {
-    assert(sql.get("0009_recipe_publication_workflow")?.includes(token), `Recipe publication workflow migration is missing ${token}.`);
-  }
-  for (const token of [
-    "recipe_change_sets",
-    "recipe_change_set_events",
-    "base_recipe_revision",
-    "base_content_revision",
-    "base_content_json",
-    "content_json",
-    "idx_recipe_change_sets_one_active_per_recipe",
-    "idx_recipe_change_sets_active_media",
-    "recipe_change_sets_require_published_owner_insert",
-    "recipe_change_sets_media_not_assigned_elsewhere_insert",
-    "recipes_media_not_reserved_by_change_set_insert",
-  ]) {
-    assert(sql.get("0010_published_recipe_change_sets")?.includes(token), `Published recipe change-set migration is missing ${token}.`);
-  }
-  for (const token of [
-    "recipe_change_set_origins",
-    "editor_current",
-    "revision_snapshot",
-    "approved_change_set_proposed",
-    "approved_change_set_baseline",
-    "media_fallback_applied",
-    "recipe_change_set_origins_immutable",
-    "recipe_change_set_origins_require_editor_creator",
-    "recipe_change_set_origins_match_change_set_creator",
-  ]) {
-    assert(sql.get("0011_editor_change_set_origins")?.includes(token), `Editor change-set origin migration is missing ${token}.`);
+  const migrationTokens = new Map([
+    ["0001_initial", ["recipe_localizations", "recipe_nutrition", "media_assets"]],
+    ["0004_auth_accounts", ["auth_tokens", "user_consents", "auth_audit_events", "idx_users_email_nocase"]],
+    ["0005_media_pipeline", ["media_upload_intents", "media_moderation_events", "moderation_status", "storage_etag", "8388608"]],
+    ["0006_recipe_editorial", ["media_asset_id", "revision", "recipe_editorial_events", "recipes_record_initial_review_submission", "recipes_record_editorial_transition"]],
+    ["0007_recipe_revisions", ["content_revision", "change_requested_at", "revision_write_token", "recipe_revision_snapshots", "initial_submission", "resubmission"]],
+    ["0008_media_derivatives", ["media_derivative_jobs", "media_derivatives", "source_orientation", "normalized_width", "generation_token", "policy_version", "source_sha256", "cleanup_pending", "media_assets_derivatives_regenerate_after_source_change"]],
+    ["0009_recipe_publication_workflow", ["scheduled_publish_at", "scheduled_by", "schedule_revision", "archived_at", "restored_at", "recipe_publication_events", "scheduled_published", "idx_recipes_scheduled_publication"]],
+    ["0010_published_recipe_change_sets", ["recipe_change_sets", "recipe_change_set_events", "base_recipe_revision", "base_content_revision", "base_content_json", "content_json", "idx_recipe_change_sets_one_active_per_recipe", "idx_recipe_change_sets_active_media", "recipe_change_sets_require_published_owner_insert", "recipe_change_sets_media_not_assigned_elsewhere_insert", "recipes_media_not_reserved_by_change_set_insert"]],
+    ["0011_editor_change_set_origins", ["recipe_change_set_origins", "editor_current", "revision_snapshot", "approved_change_set_proposed", "approved_change_set_baseline", "media_fallback_applied", "recipe_change_set_origins_immutable", "recipe_change_set_origins_require_editor_creator", "recipe_change_set_origins_match_change_set_creator"]],
+    ["0012_recipe_change_set_rebases", ["recipe_change_set_rebases", "recipe-three-way-v1", "resolution_json", "previous_base_content_json", "live_content_json", "previous_proposed_content_json", "resulting_proposed_content_json", "recipe_change_set_rebases_immutable", "recipe_change_set_rebases_require_resulting_state"]],
+  ]);
+  for (const [migration, tokens] of migrationTokens) {
+    for (const token of tokens) {
+      assert(sql.get(migration)?.includes(token), `${migration} is missing ${token}.`);
+    }
   }
 
   const wrangler = await readFile(path.join(root, "wrangler.d1.jsonc"), "utf8");
@@ -209,7 +159,7 @@ async function validateSecurityFoundations() {
   assert(delivery.includes("mediaDerivativeCacheToken"), "Public derivative URLs must be policy and checksum versioned.");
   assert(delivery.includes("X-Content-SHA256"), "Derivative checksum response metadata is missing.");
 
-  const editorial = await readFile(path.join(root, "src", "lib", "recipe-submissions.ts"), "utf8");
+  const submissions = await readFile(path.join(root, "src", "lib", "recipe-submissions.ts"), "utf8");
   for (const token of [
     "MEDIA_DERIVATIVE_POLICY_VERSION",
     "derivative_ready",
@@ -222,7 +172,7 @@ async function validateSecurityFoundations() {
     'current.media_status !== "approved"',
     "revision = revision + 1",
   ]) {
-    assert(editorial.includes(token), `Recipe editorial invariant is missing: ${token}.`);
+    assert(submissions.includes(token), `Recipe editorial invariant is missing: ${token}.`);
   }
 
   const revisions = await readFile(path.join(root, "src", "lib", "recipe-revisions.ts"), "utf8");
@@ -261,7 +211,6 @@ async function validateSecurityFoundations() {
   for (const token of [
     "startPublishedRecipeChangeSet",
     "savePublishedRecipeChangeSet",
-    "requestPublishedRecipeChangeSetChanges",
     "approvePublishedRecipeChangeSet",
     "base_recipe_revision",
     "base_content_revision",
@@ -298,6 +247,34 @@ async function validateSecurityFoundations() {
     "sharedAtomicApproval: true",
   ]) {
     assert(editorChangeSets.includes(token), `Editor-authored recipe change-set invariant is missing: ${token}.`);
+  }
+
+  const conflicts = await readFile(path.join(root, "src", "lib", "recipe-change-set-conflicts.ts"), "utf8");
+  for (const token of [
+    "RECIPE_THREE_WAY_STRATEGY_VERSION",
+    "recipe-three-way-v1",
+    "buildRecipeChangeSetThreeWay",
+    'state = "proposal_only"',
+    'state = "live_only"',
+    'state = "same_change"',
+    'state = "conflict"',
+    "mergeThreeWayDraft",
+    "rebaseRecipeChangeSet",
+    "requestRecipeChangeSetConflictResolution",
+    "requireEligibleMedia",
+    "recipe_change_set_rebases",
+    "base_content_json",
+    "content_json",
+    'row.live_status !== "published"',
+    "database.batch([update, audit])",
+    "atomicCollectionUnits: true",
+    "explicitConflictChoices: true",
+    "privateRebaseOnly: true",
+    "immutableRebaseAudit: true",
+    "staleApprovalStillBlocked: true",
+    "reviewerConflictHandoff: true",
+  ]) {
+    assert(conflicts.includes(token), `Recipe change-set conflict invariant is missing: ${token}.`);
   }
 
   const submitRoute = await readFile(path.join(root, "src", "pages", "api", "recipes", "submissions.ts"), "utf8");
@@ -343,26 +320,58 @@ async function validateSecurityFoundations() {
     assert(editorChangeSetRoute.includes(token), `Editor-authored change-set route is missing: ${token}.`);
   }
 
-  const editorChangeSetPage = await readFile(path.join(root, "src", "pages", "admin", "recipes", "[id]", "change-set.astro"), "utf8");
-  for (const token of [
-    "getEditorPublishedRecipeChangeSetWorkspace",
-    "data-restore-source",
-    "data-editor-authored-change-set",
-    "Uploading on the contributor's behalf is intentionally unavailable",
-    "Submit for review",
-  ]) {
-    assert(editorChangeSetPage.includes(token), `Editor-authored change-set page invariant is missing: ${token}.`);
-  }
-
-  const middleware = await readFile(path.join(root, "src", "middleware.ts"), "utf8");
-  assert(middleware.includes("editor-change-set"), "Editor-authored change-set API must be marked private and no-store.");
+  const rebaseRoute = await readFile(path.join(root, "src", "pages", "api", "recipe-change-sets", "[id]", "rebase.ts"), "utf8");
+  assert(rebaseRoute.includes('validateCsrfToken("recipe-change-set-rebase"'), "Recipe rebase CSRF check is missing.");
+  assert(rebaseRoute.includes("consumeRateLimit"), "Recipe rebase rate limit is missing.");
+  assert(rebaseRoute.includes("rebaseRecipeChangeSet"), "Recipe rebase service call is missing.");
+  assert(rebaseRoute.includes('"Cache-Control": "private, no-store"'), "Recipe rebase responses must remain private and no-store.");
+  assert(rebaseRoute.includes('value !== "live" && value !== "proposed"'), "Recipe rebase choices must be restricted to live or proposed.");
 
   const changeSetEditorialRoute = await readFile(path.join(root, "src", "pages", "api", "recipe-change-sets", "[id]", "editorial.ts"), "utf8");
   assert(changeSetEditorialRoute.includes('validateCsrfToken("recipe-change-set-editorial"'), "Published change-set editorial CSRF check is missing.");
   assert(changeSetEditorialRoute.includes('locals.user.role !== "editor"'), "Published change-set editorial role check is missing.");
+  assert(changeSetEditorialRoute.includes("requestRecipeChangeSetConflictResolution"), "Editorial conflict handoff is missing.");
   for (const token of ["request_changes", "approve", "cancel", "expectedRevision"]) {
     assert(changeSetEditorialRoute.includes(token), `Published change-set editorial route is missing: ${token}.`);
   }
+
+  const conflictPage = await readFile(path.join(root, "src", "pages", "account", "change-sets", "[id]", "conflicts.astro"), "utf8");
+  for (const token of [
+    "getRecipeChangeSetConflictContext",
+    "Stored baseline",
+    "Current live",
+    "Private proposal",
+    "data-conflict-unit",
+    "data-rebase-change-set",
+    "Keep current live value",
+    "Keep private proposed value",
+    "Ingredient, direction, and category collections are treated as atomic units",
+  ]) {
+    assert(conflictPage.includes(token), `Recipe conflict workspace invariant is missing: ${token}.`);
+  }
+
+  const contributorPage = await readFile(path.join(root, "src", "pages", "account", "submissions", "[id]", "change-set.astro"), "utf8");
+  assert(contributorPage.includes("baseStale"), "Contributor change-set page must detect a stale base.");
+  assert(contributorPage.includes("Resolve three-way conflict"), "Contributor stale workflow must link to conflict resolution.");
+  assert(contributorPage.includes("!baseStale"), "Contributor normal editing must be disabled while stale.");
+
+  const editorialReviewPage = await readFile(path.join(root, "src", "pages", "admin", "recipe-change-sets", "[id].astro"), "utf8");
+  for (const token of [
+    "getRecipeChangeSetConflictContext",
+    "Stored baseline",
+    "Current live version",
+    "Private proposed version",
+    "Open three-way conflict workspace",
+    "Request conflict resolution",
+    "disabled={!approveReady}",
+  ]) {
+    assert(editorialReviewPage.includes(token), `Editorial three-way review invariant is missing: ${token}.`);
+  }
+
+  const middleware = await readFile(path.join(root, "src", "middleware.ts"), "utf8");
+  assert(middleware.includes("editor-change-set"), "Editor-authored change-set API must be marked private and no-store.");
+  assert(middleware.includes('pathname.startsWith("/account/")'), "Account conflict pages must be marked private and no-store.");
+  assert(middleware.includes('pathname.startsWith("/api/recipe-change-sets/")'), "Recipe conflict APIs must be marked private and no-store.");
 
   const moderation = await readFile(path.join(root, "src", "lib", "media-moderation.ts"), "utf8");
   for (const token of ["media_derivative_jobs", "required_variant_count", "ready_variant_count", "MEDIA_DERIVATIVE_POLICY_VERSION"]) {
@@ -409,6 +418,13 @@ async function validateSecurityFoundations() {
     "editorChangeSetCurrentLiveBaseline",
     "historicalSnapshotMediaFallback",
     "editorChangeSetSharedAtomicApproval",
+    "changeSetThreeWayComparison",
+    "changeSetAtomicCollectionUnits",
+    "changeSetExplicitConflictChoices",
+    "changeSetPrivateRebaseOnly",
+    "changeSetImmutableRebaseAudit",
+    "changeSetStaleApprovalBlocked",
+    "changeSetReviewerConflictHandoff",
   ]) {
     assert(health.includes(token), `Health capability is missing: ${token}.`);
   }
@@ -436,4 +452,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, eleven D1 migrations, guarded authentication, privacy-safe media derivatives, scheduled publication, archive restoration, contributor and editor-authored private published recipe change sets, historical snapshot restoration, recipe editorial and contributor revision invariants, and browser scripts.`);
+console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, twelve D1 migrations, guarded authentication, privacy-safe media derivatives, scheduled publication, archive restoration, contributor/editor private published recipe change sets, historical restoration, audited three-way conflict assistance, atomic private rebases, recipe editorial and contributor revision invariants, and browser scripts.`);
