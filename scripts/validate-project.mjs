@@ -36,6 +36,7 @@ async function validateMigrations() {
     "0004_auth_accounts",
     "0005_media_pipeline",
     "0006_recipe_editorial",
+    "0007_recipe_revisions",
   ];
   const actual = (await readdir(directory, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory())
@@ -61,6 +62,9 @@ async function validateMigrations() {
   }
   for (const token of ["media_asset_id", "revision", "recipe_editorial_events", "recipes_record_initial_review_submission", "recipes_record_editorial_transition"]) {
     assert(sql.get("0006_recipe_editorial")?.includes(token), `Editorial migration is missing ${token}.`);
+  }
+  for (const token of ["content_revision", "change_requested_at", "revision_write_token", "recipe_revision_snapshots", "initial_submission", "resubmission"]) {
+    assert(sql.get("0007_recipe_revisions")?.includes(token), `Recipe revision migration is missing ${token}.`);
   }
 
   const wrangler = await readFile(path.join(root, "wrangler.d1.jsonc"), "utf8");
@@ -98,14 +102,35 @@ async function validateSecurityFoundations() {
     assert(editorial.includes(token), `Recipe editorial invariant is missing: ${token}.`);
   }
 
+  const revisions = await readFile(path.join(root, "src", "lib", "recipe-revisions.ts"), "utf8");
+  for (const token of [
+    "requestRecipeChanges",
+    "resubmitRecipeRevision",
+    "recipe_revision_snapshots",
+    "revision_write_token",
+    "status = 'draft'",
+    "content_revision = content_revision + 1",
+    "database.batch(statements)",
+    "assigned.id <> ?",
+  ]) {
+    assert(revisions.includes(token), `Recipe revision invariant is missing: ${token}.`);
+  }
+
   const submitRoute = await readFile(path.join(root, "src", "pages", "api", "recipes", "submissions.ts"), "utf8");
   assert(submitRoute.includes('validateCsrfToken("recipe-submit"'), "Recipe submission CSRF check is missing.");
   assert(submitRoute.includes("consumeRateLimit"), "Recipe submission rate limit is missing.");
   assert(submitRoute.includes("validateRecipeDraft"), "Canonical recipe validation is missing from submission.");
 
+  const resubmitRoute = await readFile(path.join(root, "src", "pages", "api", "recipes", "[id]", "resubmit.ts"), "utf8");
+  assert(resubmitRoute.includes('validateCsrfToken("recipe-resubmit"'), "Recipe resubmission CSRF check is missing.");
+  assert(resubmitRoute.includes("consumeRateLimit"), "Recipe resubmission rate limit is missing.");
+  assert(resubmitRoute.includes("validateRecipeDraft"), "Canonical recipe validation is missing from resubmission.");
+  assert(resubmitRoute.includes("expectedRevision"), "Recipe resubmission optimistic lock is missing.");
+
   const editorialRoute = await readFile(path.join(root, "src", "pages", "api", "recipes", "[id]", "editorial.ts"), "utf8");
   assert(editorialRoute.includes('validateCsrfToken("recipe-editorial"'), "Recipe editorial CSRF check is missing.");
   assert(editorialRoute.includes('locals.user.role !== "editor"'), "Recipe editorial role check is missing.");
+  assert(editorialRoute.includes('action !== "request_changes"'), "Recipe requested-changes action is missing.");
 }
 
 async function validateBrowserScripts() {
@@ -130,4 +155,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, six D1 migrations, guarded authentication, media, recipe editorial invariants, and browser scripts.`);
+console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, seven D1 migrations, guarded authentication, media, recipe editorial and contributor revision invariants, and browser scripts.`);
