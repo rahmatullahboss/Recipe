@@ -379,11 +379,31 @@ export async function transitionRecipeEditorialStatus(input: {
          reviewed_at = CURRENT_TIMESTAMP,
          published_at = CASE WHEN ? = 'published' THEN CURRENT_TIMESTAMP ELSE published_at END,
          updated_at = CURRENT_TIMESTAMP
-     WHERE id = ? AND status = 'review' AND revision = ?`,
-  ).bind(nextStatus, input.actorId, reason, nextStatus, input.recipeId, input.expectedRevision).run();
+     WHERE id = ?
+       AND status = 'review'
+       AND revision = ?
+       AND (
+         ? != 'published'
+         OR EXISTS (
+           SELECT 1
+           FROM media_assets m
+           WHERE m.id = recipes.media_asset_id
+             AND m.upload_status = 'uploaded'
+             AND m.moderation_status = 'approved'
+         )
+       )`,
+  ).bind(
+    nextStatus,
+    input.actorId,
+    reason,
+    nextStatus,
+    input.recipeId,
+    input.expectedRevision,
+    nextStatus,
+  ).run();
 
   if (!result.success || (result.meta.changes ?? 0) !== 1) {
-    throw new RecipeSubmissionError("conflict", "The submission changed concurrently. Reload the review page.");
+    throw new RecipeSubmissionError("conflict", "The submission or attached media changed concurrently. Reload the review page.");
   }
   return { id: input.recipeId, status: nextStatus, revision: input.expectedRevision + 1 };
 }
