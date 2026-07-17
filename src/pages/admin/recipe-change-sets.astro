@@ -1,0 +1,56 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { listPublishedRecipeChangeSetQueue } from "../../lib/recipe-change-sets";
+import { getRecipeSubmissionReadiness } from "../../lib/recipe-submissions";
+
+if (!Astro.locals.user || !Astro.locals.session) {
+  return Astro.redirect("/login?next=%2Fadmin%2Frecipe-change-sets", 302);
+}
+const editorial = Astro.locals.user.role === "editor" || Astro.locals.user.role === "admin";
+if (!editorial) Astro.response.status = 403;
+const readiness = getRecipeSubmissionReadiness();
+const queue = editorial && readiness.database ? await listPublishedRecipeChangeSetQueue(100) : [];
+---
+
+<BaseLayout title="Published Recipe Update Queue — Ozzyl Recipes" description="Review private change sets for published recipes." robots="noindex,nofollow">
+  <section class="section section--soft">
+    <div class="container">
+      <p class="eyebrow">Editorial operations</p>
+      <h1 class="section-title">Published recipe update queue</h1>
+      <p class="section-copy">Each proposal remains private. The current published recipe and normalized rows stay unchanged until an atomic editorial promotion succeeds.</p>
+      <div class="editor-actions editor-actions--compact">
+        <a class="recipe-tool-button" href="/admin/recipes">Initial submission queue</a>
+        <a class="recipe-tool-button" href="/admin/media">Media moderation</a>
+      </div>
+    </div>
+  </section>
+  <section class="section">
+    <div class="container moderation-shell">
+      {!editorial ? (
+        <div class="auth-alert auth-alert--error"><strong>Editorial permission required.</strong></div>
+      ) : !readiness.database ? (
+        <div class="auth-alert"><strong>D1 change-set storage is unavailable.</strong></div>
+      ) : queue.length === 0 ? (
+        <div class="moderation-empty"><h2>No published updates awaiting review</h2><p>The private change-set queue is clear.</p></div>
+      ) : (
+        <div class="submission-list">
+          {queue.map((item: any) => {
+            const stale = item.live_revision !== item.base_recipe_revision || item.live_content_revision !== item.base_content_revision;
+            return (
+              <article class="submission-card">
+                <p class="eyebrow">Published update · revision {item.revision}</p>
+                <h2>{item.live_title}</h2>
+                <p class="submission-card__meta">By {item.owner_name} · media {item.media_moderation_status || "missing"} · base recipe {item.base_recipe_revision}/{item.base_content_revision}</p>
+                {stale && <div class="auth-alert auth-alert--error"><strong>Base conflict:</strong> the live recipe changed after this proposal started.</div>}
+                <div class="editor-actions editor-actions--compact">
+                  <a class="button" href={`/admin/recipe-change-sets/${item.id}`}>Review private update</a>
+                  <a class="recipe-tool-button" href={`/recipes/${item.slug}`}>View live recipe</a>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  </section>
+</BaseLayout>
