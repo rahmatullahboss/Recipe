@@ -76,6 +76,7 @@
 ### Operations and security
 
 - Pull-request CI passing on Node.js 24
+- Latest verified CI: run #122
 - Automatic D1-free production deployment workflow
 - Credential validation and deployed health smoke test
 - Guarded future D1 provisioning/migration workflow
