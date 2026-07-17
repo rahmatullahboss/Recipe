@@ -5,6 +5,7 @@ import { getAuthReadiness } from "../../lib/auth";
 import { hasDatabase } from "../../lib/db";
 import { markets } from "../../lib/market";
 import { getMediaReadiness } from "../../lib/media";
+import { getMediaRuntimeStatus } from "../../lib/media-runtime";
 
 type OptionalBindings = {
   DB?: D1Database;
@@ -19,6 +20,7 @@ export const GET: APIRoute = async () => {
   const d1Bound = hasDatabase();
   const auth = getAuthReadiness();
   const media = getMediaReadiness();
+  const mediaRuntime = getMediaRuntimeStatus();
 
   return Response.json(
     {
@@ -52,7 +54,9 @@ export const GET: APIRoute = async () => {
         registrationMissingCount: auth.registrationMissing.length,
       },
       media: {
-        ready: media.ready,
+        uploadsEnabled: mediaRuntime.uploadsEnabled,
+        storageReady: media.ready,
+        ready: mediaRuntime.uploadsEnabled && media.ready && auth.ready,
         database: media.database,
         storage: media.storage,
         maximumUploadBytes: media.maxBytes,
