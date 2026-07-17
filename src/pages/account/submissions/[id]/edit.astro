@@ -1,0 +1,202 @@
+---
+import BaseLayout from "../../../../layouts/BaseLayout.astro";
+import {
+  CSRF_COOKIE,
+  createCsrfToken,
+  createRandomToken,
+  getCsrfCookieOptions,
+} from "../../../../lib/auth";
+import { listCategories } from "../../../../lib/db";
+import { markets } from "../../../../lib/market";
+import { getMediaReadiness } from "../../../../lib/media";
+import { getMediaRuntimeStatus } from "../../../../lib/media-runtime";
+import { supportedRecipeLanguages } from "../../../../lib/recipe-draft";
+import { getContributorEditableSubmission } from "../../../../lib/recipe-revisions";
+import { getRecipeSubmissionReadiness } from "../../../../lib/recipe-submissions";
+
+const recipeId = Astro.params.id ?? "";
+if (!Astro.locals.user || !Astro.locals.session) {
+  return Astro.redirect(`/login?next=${encodeURIComponent(`/account/submissions/${recipeId}/edit`)}`, 302);
+}
+
+const validId = /^recipe_[0-9a-f-]{36}$/i.test(recipeId);
+const submissionReadiness = getRecipeSubmissionReadiness();
+const editable = validId && submissionReadiness.database
+  ? await getContributorEditableSubmission(Astro.locals.user.id, recipeId)
+  : null;
+if (validId && submissionReadiness.database && !editable) Astro.response.status = 404;
+
+const categories = await listCategories(100);
+const mediaReadiness = getMediaReadiness();
+const mediaRuntime = getMediaRuntimeStatus();
+const hasVerifiedSession = Boolean(Astro.locals.authReady && Astro.locals.user && Astro.locals.session);
+const canUploadMedia = Boolean(editable && hasVerifiedSession && mediaRuntime.uploadsEnabled && mediaReadiness.ready);
+const canResubmit = Boolean(editable && hasVerifiedSession && submissionReadiness.ready);
+
+let nonce = Astro.cookies.get(CSRF_COOKIE)?.value;
+if ((canUploadMedia || canResubmit) && !nonce) {
+  nonce = createRandomToken(18);
+  Astro.cookies.set(CSRF_COOKIE, nonce, getCsrfCookieOptions(Astro.request));
+}
+const mediaCsrf = canUploadMedia ? await createCsrfToken("media-intent", nonce) : "";
+const resubmitCsrf = canResubmit ? await createCsrfToken("recipe-resubmit", nonce) : "";
+const sessionCsrf = Astro.locals.session.csrfToken;
+const draft = editable?.draft;
+const languageLabels: Record<string, string> = {
+  en: "English",
+  fr: "French",
+  de: "German",
+  sv: "Swedish",
+  nl: "Dutch",
+};
+---
+
+<BaseLayout
+  title={editable ? `Revise ${draft?.title} — Ozzyl Recipes` : "Recipe Revision — Ozzyl Recipes"}
+  description="Revise a contributor-owned recipe after an editorial change request."
+  robots="noindex,nofollow"
+>
+  <section class="section section--soft">
+    <div class="container">
+      <p class="eyebrow">Contributor revision</p>
+      <h1 class="section-title">{editable ? `Revise ${draft?.title}` : "Recipe revision unavailable"}</h1>
+      {editable && <p class="section-copy">Content revision {editable.contentRevision} · lock revision {editable.revision}. Resubmission returns the complete recipe to the private editorial queue.</p>}
+    </div>
+  </section>
+
+  <section
+    class="section"
+    data-recipe-revision-editor
+    data-recipe-id={editable?.recipeId ?? ""}
+    data-revision={editable?.revision ?? ""}
+    data-content-revision={editable?.contentRevision ?? ""}
+    data-resubmit-enabled={canResubmit ? "true" : "false"}
+    data-storage-key={editable ? `ozzyl:recipe-revision:${editable.recipeId}:v1` : ""}
+    data-csrf={resubmitCsrf}
+    data-session-csrf={sessionCsrf}
+  >
+    <div class="container">
+      {!submissionReadiness.database ? (
+        <div class="auth-alert"><strong>D1 revision storage is unavailable.</strong></div>
+      ) : !editable || !draft ? (
+        <div class="moderation-empty">
+          <h2>This recipe cannot be edited</h2>
+          <p>Only your own recipe with an active editorial change request can open this page.</p>
+          <a class="button" href="/account/submissions">Back to submissions</a>
+        </div>
+      ) : (
+        <div class="editor-shell">
+          <form class="editor-form" novalidate>
+            <input name="mediaAssetId" type="hidden" value={draft.mediaAssetId ?? ""} data-media-asset-id />
+
+            <div class="auth-alert auth-alert--error" role="alert">
+              <strong>Editorial changes requested</strong>
+              <p>{editable.changeReason || "Review the recipe carefully and address the editorial feedback before resubmitting."}</p>
+              {editable.changeRequestedAt && <small>Requested {new Date(editable.changeRequestedAt).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })}</small>}
+            </div>
+
+            <div class="editor-section">
+              <div class="editor-section__heading">
+                <div><h2>Recipe identity</h2><p>Update the recipe while preserving original, accurate contributor copy.</p></div>
+                <span class="editor-status" data-revision-status aria-live="polite">Loaded from D1.</span>
+              </div>
+              <div class="editor-grid">
+                <label class="editor-field editor-field--full"><span>Recipe title</span><input name="title" type="text" maxlength="120" value={draft.title} /></label>
+                <label class="editor-field editor-field--full"><span>Short summary</span><textarea name="summary" maxlength="240">{draft.summary}</textarea></label>
+                <label class="editor-field editor-field--full"><span>Full introduction</span><textarea name="description" maxlength="5000">{draft.description}</textarea></label>
+              </div>
+            </div>
+
+            <div class="editor-section" data-media-uploader data-media-enabled={canUploadMedia ? "true" : "false"}>
+              <div class="editor-section__heading">
+                <div><h2>Recipe image</h2><p>Keep the eligible existing hero image or upload a replacement for separate moderation.</p></div>
+                <span class="editor-status" data-media-status aria-live="polite">{editable.media ? `Attached · ${editable.media.moderationStatus}` : "Replacement required"}</span>
+              </div>
+              {editable.mediaReplacementRequired && <div class="validation-errors"><p>The previous image is rejected, quarantined, deleted, or otherwise unavailable. Upload a new hero image before resubmitting.</p></div>}
+              {canUploadMedia ? (
+                <div class="media-upload-grid">
+                  <input type="hidden" value={mediaCsrf} data-media-csrf />
+                  <input type="hidden" value={sessionCsrf} data-media-session-csrf />
+                  <label class="editor-field editor-field--full"><span>Replacement JPEG, PNG, or WebP</span><input data-media-file type="file" accept="image/jpeg,image/png,image/webp" /><small class="editor-help">Maximum 8 MB. Minimum 320 × 240 pixels.</small></label>
+                  <label class="editor-field editor-field--full"><span>Alternative text</span><input data-media-alt type="text" maxlength="240" value={editable.media?.altText ?? ""} placeholder="Describe the visible food and important context." /></label>
+                  <div class="editor-actions editor-actions--compact">
+                    <button class="button" type="button" data-upload-media>Upload replacement</button>
+                    <button class="recipe-tool-button" type="button" data-clear-media>Detach image</button>
+                  </div>
+                </div>
+              ) : (
+                <div class="validation-errors"><p>Media replacement remains closed until authentication, D1, R2, and media uploads are ready.</p></div>
+              )}
+            </div>
+
+            <div class="editor-section">
+              <div class="editor-section__heading"><div><h2>Market and classification</h2><p>Confirm the market, language, measurements, and taxonomy.</p></div></div>
+              <div class="editor-grid editor-grid--four">
+                <label class="editor-field"><span>Country or market</span><select name="countryCode">{markets.map((option) => <option value={option.code} selected={option.code === draft.countryCode}>{option.name}</option>)}</select></label>
+                <label class="editor-field"><span>Language</span><select name="languageCode">{supportedRecipeLanguages.map((code) => <option value={code} selected={code === draft.languageCode}>{languageLabels[code]}</option>)}</select></label>
+                <label class="editor-field"><span>Measurements</span><select name="measurementSystem"><option value="us" selected={draft.measurementSystem === "us"}>US customary</option><option value="metric" selected={draft.measurementSystem === "metric"}>Metric</option></select></label>
+                <label class="editor-field"><span>Difficulty</span><select name="difficulty"><option value="easy" selected={draft.difficulty === "easy"}>Easy</option><option value="medium" selected={draft.difficulty === "medium"}>Medium</option><option value="hard" selected={draft.difficulty === "hard"}>Hard</option></select></label>
+              </div>
+              <div class="recipe-control-group" style="margin-top:20px">
+                <span class="recipe-control-label">Categories and cuisines</span>
+                <div class="category-checks">{categories.map((category) => <label class="category-check"><input type="checkbox" name="categories" value={category.slug} checked={draft.categories.includes(category.slug)} /><span>{category.name}</span></label>)}</div>
+              </div>
+            </div>
+
+            <div class="editor-section">
+              <div class="editor-section__heading"><div><h2>Timing and yield</h2><p>Use realistic active and cooking times.</p></div></div>
+              <div class="editor-grid editor-grid--four">
+                <label class="editor-field"><span>Prep minutes</span><input name="prepMinutes" type="number" min="0" max="1440" step="1" value={draft.prepMinutes} /></label>
+                <label class="editor-field"><span>Cook minutes</span><input name="cookMinutes" type="number" min="0" max="4320" step="1" value={draft.cookMinutes} /></label>
+                <label class="editor-field"><span>Servings</span><input name="servings" type="number" min="1" max="200" step="1" value={draft.servings} /></label>
+              </div>
+            </div>
+
+            <div class="editor-section">
+              <div class="editor-section__heading"><div><h2>Ingredients</h2><p>Address any requested ingredient corrections.</p></div><button class="recipe-tool-button" type="button" data-add-ingredient>Add ingredient</button></div>
+              <div class="repeating-list" data-ingredient-rows>{draft.ingredients.map((ingredient) => <div class="ingredient-row" data-ingredient-row><input name="ingredient-item" type="text" maxlength="120" value={ingredient.item} aria-label="Ingredient name" /><input name="ingredient-amount" type="text" maxlength="32" value={ingredient.amount} aria-label="Ingredient amount" /><input name="ingredient-unit" type="text" maxlength="32" value={ingredient.unit} aria-label="Ingredient unit" /><input name="ingredient-note" type="text" maxlength="160" value={ingredient.note} aria-label="Ingredient note" /><button class="remove-row-button" type="button" data-remove-ingredient aria-label="Remove ingredient">×</button></div>)}</div>
+            </div>
+
+            <div class="editor-section">
+              <div class="editor-section__heading"><div><h2>Directions</h2><p>Update complete steps in cooking order.</p></div><button class="recipe-tool-button" type="button" data-add-step>Add step</button></div>
+              <div class="repeating-list" data-step-rows>{draft.steps.map((step) => <div class="step-row" data-step-row><textarea name="step-instruction" maxlength="1000" aria-label="Step instruction">{step.instruction}</textarea><input name="step-timer" type="number" min="0" max="1440" step="1" value={step.timerMinutes ?? ""} aria-label="Optional timer in minutes" /><button class="remove-row-button" type="button" data-remove-step aria-label="Remove step">×</button></div>)}</div>
+            </div>
+
+            <div class="validation-errors" data-validation-errors hidden></div>
+
+            <div class="editor-section">
+              <div class="editor-section__heading"><div><h2>Resubmit revision</h2><p>The previous and revised content are stored as immutable snapshots before the relational recipe is replaced atomically.</p></div></div>
+              <label class="editor-field editor-field--full"><span>Contributor note</span><textarea data-contributor-note maxlength="1000" placeholder="Briefly explain how you addressed the requested changes."></textarea></label>
+              {canResubmit ? (
+                <div class="editor-actions">
+                  <button class="button" type="button" data-resubmit-recipe>Validate and resubmit</button>
+                  <button class="recipe-tool-button" type="button" data-discard-local>Discard local edits</button>
+                  <a class="recipe-tool-button" href="/account/submissions">Back to submissions</a>
+                </div>
+              ) : (
+                <div class="validation-errors"><p>Resubmission remains disabled until the full guarded recipe pipeline is ready.</p></div>
+              )}
+            </div>
+          </form>
+
+          <aside class="editor-preview" aria-label="Recipe revision preview">
+            <div class="editor-preview__image">
+              {editable.media ? <img data-preview-image src={editable.media.previewUrl} alt={editable.media.altText || "Private recipe image preview"} /> : <img data-preview-image hidden alt="" />}
+              <span data-preview-image-placeholder hidden={Boolean(editable.media)}>Recipe photo preview</span>
+            </div>
+            <p class="eyebrow">Revision preview</p>
+            <h2 data-preview-title>{draft.title}</h2>
+            <p data-preview-summary>{draft.summary}</p>
+            <p class="editor-preview__meta" data-preview-meta>{draft.countryCode} · {draft.prepMinutes + draft.cookMinutes} min · {draft.servings} servings · {draft.difficulty}</p>
+            <p class="conversion-note" data-preview-media-status>{editable.media ? `Attached image is ${editable.media.moderationStatus}.` : "A replacement image is required."}</p>
+            {editable.snapshots.length > 0 && <div><strong>Stored content history</strong><ul>{editable.snapshots.map((snapshot: any) => <li>Revision {snapshot.content_revision} · {snapshot.source}</li>)}</ul></div>}
+          </aside>
+
+          <template data-ingredient-template><div class="ingredient-row" data-ingredient-row><input name="ingredient-item" type="text" maxlength="120" placeholder="Ingredient" aria-label="Ingredient name" /><input name="ingredient-amount" type="text" maxlength="32" placeholder="Amount" aria-label="Ingredient amount" /><input name="ingredient-unit" type="text" maxlength="32" placeholder="Unit" aria-label="Ingredient unit" /><input name="ingredient-note" type="text" maxlength="160" placeholder="Optional note" aria-label="Ingredient note" /><button class="remove-row-button" type="button" data-remove-ingredient aria-label="Remove ingredient">×</button></div></template>
+          <template data-step-template><div class="step-row" data-step-row><textarea name="step-instruction" maxlength="1000" placeholder="Describe this step clearly." aria-label="Step instruction"></textarea><input name="step-timer" type="number" min="0" max="1440" step="1" placeholder="Timer min" aria-label="Optional timer in minutes" /><button class="remove-row-button" type="button" data-remove-step aria-label="Remove step">×</button></div></template>
+        </div>
+      )}
+    </div>
+  </section>
+  <script src="/scripts/recipe-revision-editor.js" defer></script>
+</BaseLayout>
