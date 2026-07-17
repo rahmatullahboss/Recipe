@@ -1,6 +1,6 @@
 # Ozzyl Recipes
 
-An original, international recipe discovery and contributor platform built with Astro 7 and Cloudflare Workers. The initial audience focus is the United States, Canada, the United Kingdom, Australia, New Zealand, France, Germany, Switzerland, Sweden, and the Netherlands.
+An original international recipe discovery, kitchen-planning, and contributor platform built with Astro 7 and Cloudflare Workers. The initial audience focus is the United States, Canada, the United Kingdom, Australia, New Zealand, France, Germany, Switzerland, Sweden, and the Netherlands.
 
 The project does not copy Allrecipes branding, source code, copyrighted recipe content, or its exact interface.
 
@@ -10,119 +10,96 @@ The project does not copy Allrecipes branding, source code, copyrighted recipe c
 
 - Cloudflare country detection prioritises recipes for the visitor's market.
 - Visitors can manually switch markets from the global header.
-- The selected market is stored in a first-party cookie for one year.
 - Every supported market has a starter regional recipe in the D1-free catalogue.
-- Country landing pages are available under `/markets/:country`.
-- Category and cuisine landing pages are available under `/categories/:slug`.
+- Country pages are available under `/markets/:country`.
+- Category and cuisine pages are available under `/categories/:slug`.
 - The full international catalogue remains available regardless of market.
 
 ### Recipe finder
 
-The server-rendered finder and JSON API share one filtering engine:
+The server-rendered finder and JSON API share keyword, ingredient, country, category, cuisine, difficulty, maximum-time, and sorting behavior across static fallback and future D1 repositories.
 
-- Keyword and ingredient search
-- Country priority
-- Category and cuisine
-- Difficulty
-- Maximum total cooking time
-- Recommended, highest-rated, quickest, and most-popular sorting
+### Cooking and kitchen tools
 
-The same repository contract works with the static catalogue and future D1 data.
-
-### Cooking tools
-
-- Adjustable servings with ingredient scaling
-- Approximate US and metric measurement conversion
-- Original-measurement mode for precision recipes
-- Print-friendly recipe view and copy-link action
-- Browser-local saved recipe collection
-- One-click addition of currently displayed ingredient quantities to a shopping list
-- One-click placement of a recipe on the next open meal-plan day
-- Distraction-free guided cooking route at `/recipes/:slug/cook`
-- Large step-by-step directions, progress tracking, keyboard navigation, countdown timers, completion sound, and supported screen wake lock
-
-### Private kitchen planning
-
-- Browser-local shopping list at `/shopping-list`
-- Purchased-item checking, individual removal, clear-checked, clear-all, and copy-to-clipboard controls
-- Browser-local seven-day meal planner at `/meal-plan`
-- Previous/current/next week navigation, per-day recipe assignment, weekly copy, and week clearing
-- Shopping and meal-plan counts shown in desktop and mobile navigation
-- Cross-tab updates through storage events
-- No account or server data transfer is required for these tools
+- Adjustable servings and approximate US/metric conversion
+- Original-measurement, print, and copy-link modes
+- Browser-local saved recipes
+- Recipe ingredient transfer to `/shopping-list`
+- Seven-day browser-local planner at `/meal-plan`
+- One-click placement on the next open planning day
+- Guided cooking at `/recipes/:slug/cook` with progress, keyboard controls, countdown timers, completion feedback, and supported wake lock
+- Cross-tab kitchen-state updates and navigation counts
 
 ### Offline and install foundation
 
-- Web application manifest and branded SVG application icon
-- Service worker registration on secure origins
-- Network-first navigation caching with an offline fallback page
+- Web application manifest and branded icon
+- Service-worker registration on secure origins
+- Network-first navigation caching and offline fallback
 - Cache-first same-origin scripts, styles, images, and fonts
-- Previously opened cacheable recipe pages can be revisited during temporary connection loss
-- APIs and media routes are intentionally excluded from service-worker interception
+- API and media routes excluded from service-worker interception
 
 ### Contributor drafts
 
-- Full recipe draft editor at `/recipes/new`
+- Browser-autosaved editor at `/recipes/new`
 - Country, language, measurement, taxonomy, timing, yield, ingredients, and directions
-- Browser autosave and recovery
-- Live recipe-card preview
-- Worker-side structured validation
-- Field-level validation errors
-- JSON draft export
+- Dynamic rows, live preview, Worker validation, field errors, and JSON export
 
-Draft images and public publishing remain disabled until authentication, Turnstile, R2 upload authorization, and moderation are connected.
+Draft images and public publishing remain disabled until signed R2 uploads, moderation, and D1 write workflows are enabled.
 
-### Accessibility
+### D1 authentication foundation
 
-- Keyboard skip link and visible focus states
-- Responsive mobile navigation with current-page indicators
-- Reduced-motion support
-- Accessible labels for market selection, recipe controls, editor rows, timers, shopping items, and planning controls
+The account implementation is complete in code but disabled by default until D1 and production dependencies are ready.
 
-### SEO and security
+- D1 identities with case-insensitive email and username uniqueness
+- Pending, active, locked, suspended, and deleted states
+- PBKDF2-HMAC-SHA256 at 600,000 iterations with unique salt and server-only pepper
+- Verified-active-only sessions stored in Workers KV
+- HTTP-only production cookie with `__Host-` prefix
+- D1 `auth_version` session revocation
+- Signed, purpose-bound, time-limited CSRF tokens
+- KV-backed login and registration rate limits
+- Server-side Turnstile Siteverify with action and hostname validation
+- Five-attempt, 15-minute lockout
+- D1 token digests for verification/reset workflows
+- Single-use 30-minute email verification
+- Authenticated verification-email webhook with failed-delivery rollback
+- D1 consent history, OAuth extension tables, and privacy-preserving audit events
+- Independent fail-closed flags for sign-in and registration
+- Non-secret readiness details in `/api/health`
 
-- Schema.org Recipe structured data
-- Cuisine and category metadata
-- Dynamic sitemap and robots endpoints
-- Crawlable market and category pages
-- Real HTTP 404 responses for unknown recipes, categories, and markets
-- Personal/editor/planning routes marked `noindex`
-- Astro middleware security headers
-- Content Security Policy
-- HSTS on HTTPS
-- Frame, MIME-sniffing, referrer, permissions, and cross-origin protections
-- Private routes and validation endpoints use `no-store`
+No pending or unverified account can create a session. Public registration remains closed until email delivery, legal review, Turnstile, D1, KV, and secrets are verified.
 
-### Integrity and operations
+### Accessibility, SEO, and security
 
-- Dependency-free validation of catalogue IDs, slugs, market coverage, taxonomy references, ingredient/step ordering, and D1 migration order
-- Syntax validation for every public browser script and the service worker
-- Runtime health diagnostics for data mode, market coverage, and Cloudflare binding readiness
-- Credentialed deployment smoke tests for expected data mode and KV/R2/Images/D1 bindings
+- Keyboard skip link, visible focus, mobile navigation, reduced-motion support, and labelled controls
+- Schema.org Recipe metadata, sitemap, robots, and real HTTP 404 responses
+- Personal/editor/planning/account routes use `noindex` and `no-store` where appropriate
+- Astro middleware CSP, HSTS, frame, MIME, referrer, permissions, and cross-origin protections
+- Syntax validation for public scripts and service worker
+- Catalogue, taxonomy, market, nested migration, and authentication-invariant validation
 
 ## Cloudflare architecture
 
-| Concern | Current implementation |
+| Concern | Implementation |
 | --- | --- |
 | Frontend and SSR | Astro 7 on Cloudflare Workers |
 | Static assets | Workers Static Assets |
-| Current recipe data | Versioned TypeScript catalogue |
-| Future relational data | D1 |
+| Current public recipe data | Versioned TypeScript catalogue |
+| Future relational data and accounts | D1 |
+| Sessions and lightweight security state | Workers KV |
 | Original media | R2 |
 | Image optimisation | Cloudflare Images binding |
-| Future sessions | Workers KV |
+| Bot protection | Turnstile |
+| Verification delivery | Authenticated HTTPS webhook |
 | Market detection | Cloudflare request `cf.country` |
+| Offline support | Manifest + service worker |
 | CI/CD | GitHub Actions + Wrangler Action v4 |
-| Offline support | Web manifest + service worker runtime cache |
-| Bot protection | Turnstile planned for account/write routes |
-| Background work | Queues planned |
-| Semantic search | Workers AI + Vectorize planned |
 
 ## Configuration modes
 
-### Current D1-free production mode
+### Current D1-free production
 
-`wrangler.jsonc` contains no D1 binding. The application automatically uses `src/data/fallback-recipes.ts`.
+`wrangler.jsonc` has no D1 binding. Public discovery and browser-local kitchen features work immediately.
 
 ```bash
 npm ci
@@ -131,9 +108,9 @@ npm run build
 npm run deploy
 ```
 
-### Future D1 mode
+### Future D1 deployment
 
-`wrangler.d1.jsonc` declares the `DB` binding and uses the migrations in `migrations/`.
+`wrangler.d1.jsonc` declares D1 and uses an authoritative nested migration layout.
 
 ```bash
 npm run db:migrate:local
@@ -141,11 +118,37 @@ npm run build:d1
 npm run deploy:d1
 ```
 
-The D1 deployment command provisions the binding, applies remote migrations, and performs the final deployment. If a D1 query fails, public recipe discovery safely falls back to the versioned catalogue.
+The D1 config keeps these values disabled by default:
+
+```jsonc
+"AUTH_ENABLED": "false",
+"AUTH_REGISTRATION_ENABLED": "false"
+```
+
+D1 recipe reads can therefore be enabled before account access. Sign-in is activated only after secrets and bindings are ready; public registration is enabled last.
+
+## Authoritative D1 migrations
+
+Wrangler applies only:
+
+```text
+migrations/d1/0001_initial/migration.sql
+migrations/d1/0002_seed/migration.sql
+migrations/d1/0003_market_coverage/migration.sql
+migrations/d1/0004_auth_accounts/migration.sql
+```
+
+`wrangler.d1.jsonc` uses:
+
+```jsonc
+"migrations_pattern": "migrations/d1/*/migration.sql"
+```
+
+The fourth migration adds user security fields, case-insensitive indexes, token digests, OAuth identities, consent history, and audit events. Root-level SQL files are legacy references and are not part of the Wrangler execution path.
 
 ## Local development
 
-Requirements: Node.js 22 or newer. GitHub CI uses Node.js 24.
+Requirements: Node.js 22 or newer. CI uses Node.js 24.
 
 ```bash
 npm ci
@@ -153,70 +156,60 @@ npm run validate
 npm run dev
 ```
 
-This starts the application in D1-free mode. Service-worker registration only runs in a secure browser context, so normal local HTTP development is not blocked by offline support.
-
-To test the future database schema locally:
+This starts the D1-free application. To test the future schema locally:
 
 ```bash
 npm run db:migrate:local
 npm run build:d1
 ```
 
+Keep account flags disabled unless the local D1, KV, Turnstile test values, password peppers, and verification webhook are intentionally configured.
+
 ## GitHub Actions
 
-- `.github/workflows/ci.yml` validates the catalogue, migrations, browser-script syntax, installs locked dependencies, generates Cloudflare types, and builds the Astro Worker.
-- `.github/workflows/deploy.yml` deploys the D1-free Worker after changes reach `main`, then verifies static data mode, ten markets, and KV/R2/Images bindings.
-- `.github/workflows/enable-d1.yml` is manually triggered and requires typing `ENABLE_D1` before provisioning D1, applying migrations, deploying, and verifying database mode and all bindings.
+- `.github/workflows/ci.yml` validates catalogue, browser scripts, authoritative migrations, authentication invariants, Cloudflare types, and the Worker build.
+- `.github/workflows/deploy.yml` deploys the D1-free Worker from `main` and verifies static mode plus KV/R2/Images bindings.
+- `.github/workflows/enable-d1.yml` requires the exact `ENABLE_D1` confirmation before provisioning D1, applying migrations, and verifying D1 mode.
 
-Required GitHub `production` environment secrets:
+Required GitHub `production` environment secrets for deployment:
 
-- `CLOUDFLARE_ACCOUNT_ID`
-- `CLOUDFLARE_API_TOKEN`
+```text
+CLOUDFLARE_ACCOUNT_ID
+CLOUDFLARE_API_TOKEN
+```
 
-See `docs/CLOUDFLARE_SETUP.md` for exact Cloudflare permissions and GitHub setup.
+Account secrets are configured later as Cloudflare Worker secrets and are never committed.
 
 ## Important routes
 
-- `/` — personalised international homepage
-- `/search` — advanced recipe finder
+- `/` — market-aware homepage
+- `/search` — advanced finder
 - `/markets` and `/markets/:country` — country discovery
 - `/categories` and `/categories/:slug` — taxonomy discovery
-- `/recipes/:slug` — interactive recipe detail
-- `/recipes/:slug/cook` — private guided cooking mode
-- `/saved` — private browser-local collection
-- `/shopping-list` — private browser-local ingredient list
-- `/meal-plan` — private browser-local weekly planner
-- `/recipes/new` — private autosaved contributor draft editor
-- `/offline` — service-worker navigation fallback
-- `/manifest.webmanifest` and `/sw.js` — install and offline foundation
-- `/api/recipes` — filtered recipe JSON API
-- `/api/recipes/validate` — contributor draft validation API
-- `/api/location` — persistent market selection
-- `/api/health` — runtime, catalogue, and binding health diagnostics
-- `/sitemap.xml` and `/robots.txt` — discovery controls
+- `/recipes/:slug` — recipe detail and tools
+- `/recipes/:slug/cook` — guided cooking
+- `/saved`, `/shopping-list`, `/meal-plan` — private browser-local tools
+- `/recipes/new` — autosaved contributor draft
+- `/login`, `/register`, `/verify-email`, `/account` — fail-closed D1 account routes
+- `/terms` and `/privacy` — current policy drafts/disclosure
+- `/offline`, `/manifest.webmanifest`, `/sw.js` — offline/install foundation
+- `/api/recipes` and `/api/recipes/validate` — recipe APIs
+- `/api/auth/*` — CSRF, Turnstile, D1, and KV protected account APIs
+- `/api/health` — runtime, binding, catalogue, and non-secret auth readiness
 
-Example API request:
+## Activation documentation
 
-```text
-/api/recipes?q=potato&country=DE&category=german&difficulty=easy&maxTime=60&sort=rating&limit=12
-```
+- `docs/CLOUDFLARE_SETUP.md` — Cloudflare/GitHub deployment and D1 boundaries
+- `docs/D1_AUTH_SETUP.md` — exact D1 authentication secrets, webhook contract, activation order, testing, and rollback
+- `docs/IMPLEMENTATION_STATUS.md` — completed and remaining scope
 
-## Database migrations
+## Remaining production phases
 
-- `0001_initial.sql` creates users, international recipes, localisation, nutrition, categories, ingredients, steps, ratings, saves, comments, and media metadata.
-- `0002_seed.sql` creates the initial editor, taxonomy, and US/UK/France/Australia recipes.
-- `0003_market_coverage.sql` adds Canada, New Zealand, Germany, Switzerland, Sweden, and Netherlands coverage.
-
-Migration commands always use `wrangler.d1.jsonc`, keeping the current production deployment independent from the D1 account limit.
-
-## Next engineering phases
-
-1. Authentication, email verification, roles, secure KV sessions, and Turnstile
-2. Signed R2 image uploads, image metadata, moderation, and Cloudflare Images delivery
-3. D1-backed contributor publishing and editorial review workflow
-4. Account-synchronised saves, shopping lists, meal plans, ratings, reviews, comments, and collections
-5. Nutrition editing and verified conversion metadata
-6. Admin taxonomy, localisation, and content moderation tools
-7. Queued media/email jobs and search indexing
-8. Workers AI + Vectorize recommendations
-9. Consent-aware analytics and advertising integration
+1. Provision D1 and run the documented authentication test matrix outside production
+2. Approve legal policies and configure the verification sender/webhook
+3. Provision initial operational administrator/editor credentials
+4. Signed R2 uploads, image delivery, and media moderation
+5. D1-backed recipe publishing and editorial review
+6. Account-synchronised kitchen data, ratings, reviews, comments, and collections
+7. Password reset, email change, deletion, and account administration interfaces using the prepared tables
+8. Nutrition administration, queued jobs, search indexing, recommendations, analytics, and advertising controls
