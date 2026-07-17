@@ -1,0 +1,114 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { getRecipeBySlug } from "../../lib/db";
+
+const slug = Astro.params.slug;
+const recipe = slug ? await getRecipeBySlug(slug) : null;
+
+if (!recipe) {
+  return Astro.redirect("/404", 302);
+}
+
+const totalMinutes = recipe.prep_minutes + recipe.cook_minutes;
+const schema = {
+  "@context": "https://schema.org",
+  "@type": "Recipe",
+  name: recipe.title,
+  description: recipe.summary,
+  image: recipe.image_url ? [recipe.image_url] : undefined,
+  author: { "@type": "Person", name: recipe.author_name },
+  prepTime: `PT${recipe.prep_minutes}M`,
+  cookTime: `PT${recipe.cook_minutes}M`,
+  totalTime: `PT${totalMinutes}M`,
+  recipeYield: `${recipe.servings} servings`,
+  recipeIngredient: recipe.ingredients.map((ingredient) =>
+    [ingredient.amount, ingredient.unit, ingredient.item, ingredient.note ? `(${ingredient.note})` : ""]
+      .filter(Boolean)
+      .join(" "),
+  ),
+  recipeInstructions: recipe.steps.map((step) => ({
+    "@type": "HowToStep",
+    text: step.instruction,
+  })),
+  aggregateRating: recipe.rating_count > 0
+    ? {
+        "@type": "AggregateRating",
+        ratingValue: recipe.average_rating,
+        ratingCount: recipe.rating_count,
+      }
+    : undefined,
+};
+---
+
+<BaseLayout
+  title={`${recipe.title} — Ozzyl Recipes`}
+  description={recipe.summary}
+  image={recipe.image_url ?? undefined}
+>
+  <script type="application/ld+json" set:html={JSON.stringify(schema)}></script>
+
+  <section class="recipe-header">
+    <div class="container">
+      <div class="breadcrumbs"><a href="/">Home</a> / <a href="/search">Recipes</a> / {recipe.title}</div>
+      <div class="chips">
+        {recipe.categories.map((category) => (
+          <a class="chip" href={`/search?q=${encodeURIComponent(category.name)}`}>{category.name}</a>
+        ))}
+      </div>
+      <h1 class="recipe-title">{recipe.title}</h1>
+      <p class="recipe-intro">{recipe.description ?? recipe.summary}</p>
+      <div class="recipe-info">
+        <span>By {recipe.author_name}</span>
+        <span class="rating">★ {recipe.average_rating.toFixed(1)} ({recipe.rating_count} ratings)</span>
+        <span>{totalMinutes} minutes</span>
+        <span>{recipe.servings} servings</span>
+        <span>{recipe.difficulty}</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="container">
+    <div class="recipe-hero-image">
+      <img
+        src={recipe.image_url ?? "/images/recipe-placeholder.svg"}
+        alt={recipe.title}
+        width="1400"
+        height="700"
+      />
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container recipe-content">
+      <aside class="recipe-panel">
+        <h2>Ingredients</h2>
+        <ul class="ingredient-list">
+          {recipe.ingredients.map((ingredient) => {
+            const amount = [ingredient.amount, ingredient.unit].filter(Boolean).join(" ");
+            return (
+              <li>
+                <span class="ingredient-amount">{amount || "As needed"}</span>
+                <span>
+                  {ingredient.item}
+                  {ingredient.note && <small> — {ingredient.note}</small>}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </aside>
+
+      <div class="directions">
+        <h2>Directions</h2>
+        <ol class="step-list">
+          {recipe.steps.map((step) => (
+            <li>
+              <p>{step.instruction}</p>
+              {step.timer_seconds && <small>{Math.ceil(step.timer_seconds / 60)} minute timer</small>}
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
