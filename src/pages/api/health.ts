@@ -6,6 +6,7 @@ import { hasDatabase } from "../../lib/db";
 import { markets } from "../../lib/market";
 import { getMediaReadiness } from "../../lib/media";
 import { getMediaRuntimeStatus } from "../../lib/media-runtime";
+import { getRecipeSubmissionReadiness } from "../../lib/recipe-submissions";
 
 type OptionalBindings = {
   DB?: D1Database;
@@ -21,6 +22,7 @@ export const GET: APIRoute = async () => {
   const auth = getAuthReadiness();
   const media = getMediaReadiness();
   const mediaRuntime = getMediaRuntimeStatus();
+  const recipeSubmissions = getRecipeSubmissionReadiness();
 
   return Response.json(
     {
@@ -62,6 +64,16 @@ export const GET: APIRoute = async () => {
         maximumUploadBytes: media.maxBytes,
         allowedMimeTypeCount: media.allowedMimeTypes.length,
         publicDeliveryRequiresApproval: true,
+      },
+      recipeSubmissions: {
+        enabled: recipeSubmissions.enabled,
+        ready: recipeSubmissions.ready,
+        database: recipeSubmissions.database,
+        authentication: recipeSubmissions.authentication,
+        mediaUploads: recipeSubmissions.mediaUploads,
+        mediaStorage: recipeSubmissions.mediaStorage,
+        missingCount: recipeSubmissions.missing.length,
+        publicationRequiresApprovedMedia: true,
       },
       timestamp: new Date().toISOString(),
     },
