@@ -40,22 +40,30 @@
 - Cache-first same-origin static resources
 - API and media routes excluded from interception
 
-### Contributor foundation
+### Contributor and recipe editorial foundation
 
 - Browser-autosaved international recipe draft editor
 - Country, language, measurement, taxonomy, timing, ingredients, and directions
 - Dynamic rows, live preview, Worker validation, field errors, and JSON export
-- Optional media asset reference retained in the structured local draft
+- Private hero-image attachment and contributor-owned submission status
+- Canonical server validation before trusted writes
+- D1 category, media ownership, asset-purpose, moderation-state, and uniqueness checks
+- Atomic D1 recipe/category/ingredient/direction submission transaction
+- Private editor/admin recipe queue and detailed review
+- Publication gated on complete content and approved uploaded media
+- Optimistic revision and race-safe conditional publication updates
+- Editorial archival reasons and trigger-backed status history
 
 ### D1 schema and migration readiness
 
-- Recipe, localisation, nutrition, taxonomy, ingredient, step, rating, save, comment, and media schema
+- Recipe, localisation, nutrition, taxonomy, ingredient, step, rating, save, comment, media, and editorial schema
 - Authoritative nested Wrangler migration sequence:
   - `migrations/d1/0001_initial/migration.sql`
   - `migrations/d1/0002_seed/migration.sql`
   - `migrations/d1/0003_market_coverage/migration.sql`
   - `migrations/d1/0004_auth_accounts/migration.sql`
   - `migrations/d1/0005_media_pipeline/migration.sql`
+  - `migrations/d1/0006_recipe_editorial/migration.sql`
 - `migrations_pattern` restricts Wrangler to the authoritative nested sequence
 - Separate D1-free and D1-enabled Wrangler configurations
 
@@ -98,55 +106,69 @@
 - Non-secret media readiness diagnostics in `/api/health`
 - Dedicated media architecture, activation, testing, and rollback documentation
 
+### Guarded recipe submissions
+
+- Independent `RECIPE_SUBMISSIONS_ENABLED` flag, disabled in checked-in configuration
+- Recipe submissions require ready authentication and enabled moderated media uploads
+- Protected `/api/recipes/submissions` with same-origin, signed CSRF, session CSRF, body-size, rate-limit, and canonical validation checks
+- Protected `/api/recipes/:id/editorial` restricted to editor/admin roles
+- Contributor status page at `/account/submissions`
+- Editorial queue at `/admin/recipes` and detailed review at `/admin/recipes/:id`
+- Non-secret recipe-submission readiness diagnostics in `/api/health`
+- Guarded workflow input and deployed-health verification
+- Dedicated architecture, test matrix, and rollback documentation
+
 ### Operations and security
 
 - Pull-request CI on Node.js 24
-- Catalogue, taxonomy, market, nested migration, auth-invariant, media-invariant, and browser-script validation
+- Catalogue, six-stage migration, authentication, media, recipe-editorial, and browser-script validation
 - Automatic D1-free deployment workflow
 - Guarded future D1 provisioning/migration workflow
-- Guarded account workflow with independent registration and contributor-media inputs
+- Guarded account workflow with independent registration, media, and recipe-submission inputs
 - Credential and deployed-health checks
 - R2 missing-binding handling
 - Astro middleware CSP, HSTS, frame, MIME, referrer, permissions, and cross-origin controls
-- Private route `no-store` and `noindex` controls
-- Cloudflare, D1 authentication, media activation, and rollback documentation
+- Private account/admin/write route `no-store` and `noindex` controls
+- Cloudflare, D1 authentication, media, recipe editorial, activation, and rollback documentation
 
 ## Current deployment mode
 
 ```text
-wrangler.jsonc → static-fallback data mode → no D1 account or media writes
+wrangler.jsonc → static-fallback data mode → no D1 trusted writes
 ```
 
-D1, accounts, and contributor media are not required for the current public application.
+D1, accounts, contributor media, and recipe submissions are not required for the current public application.
 
 ## Future guarded D1 deployment
 
 ```text
 wrangler.d1.jsonc
   → provision DB and R2 bindings
-  → apply authoritative nested migrations
+  → apply six authoritative nested migrations
   → deploy D1 recipe reads
   → keep AUTH_ENABLED=false
   → keep AUTH_REGISTRATION_ENABLED=false
   → keep MEDIA_UPLOADS_ENABLED=false
+  → keep RECIPE_SUBMISSIONS_ENABLED=false
   → configure secrets, Turnstile, and email webhook
   → enable sign-in
   → provision editor/admin accounts and test moderation
   → optionally enable contributor media
+  → optionally enable recipe submissions after media testing
   → approve legal/email testing
   → enable registration separately and last
 ```
 
-Public recipe queries fall back to the versioned catalogue if D1 reads fail. Turning media uploads off stops new intents and raw uploads without removing approved public assets or editorial access.
+Public recipe queries fall back to the versioned catalogue if D1 reads fail. Disabling recipe submissions closes new submissions and editorial transitions without removing existing published recipe reads or audit history.
 
 ## Remaining production phases
 
-1. Provision a non-production D1/R2 environment and execute the documented account and media test matrices
+1. Provision a non-production D1/R2 environment and execute the documented account, media, and recipe test matrices
 2. Approve Terms and Privacy text for the operating company and jurisdiction
 3. Configure the verification email provider/webhook and sender domain
 4. Provision initial administrator/editor credentials through a controlled process
 5. Add privacy-safe image derivatives, metadata stripping, orientation normalisation, and optional automated scanning
-6. Implement D1-backed recipe submission, asset ownership checks, editorial review, and publishing transactions
+6. Add contributor editing after submission, requested changes, resubmission, scheduled publishing, published-recipe revisions, and archive restoration
 7. Add account-synchronised saves, shopping lists, meal plans, ratings, reviews, comments, and collections
 8. Add password reset, email change, account deletion, and administration interfaces using the prepared D1 tables
 9. Add nutrition editing, taxonomy/localisation administration, queued jobs, search indexing, recommendations, analytics, and advertising controls
