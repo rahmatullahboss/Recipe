@@ -1,9 +1,9 @@
 import type { APIRoute } from "astro";
 import { CSRF_COOKIE, isSameOriginRequest, validateCsrfToken } from "../../../../lib/auth";
+import { requestRecipeChangeSetConflictResolution } from "../../../../lib/recipe-change-set-conflicts";
 import {
   approvePublishedRecipeChangeSet,
   cancelPublishedRecipeChangeSetEditorial,
-  requestPublishedRecipeChangeSetChanges,
 } from "../../../../lib/recipe-change-sets";
 import { getRecipeSubmissionReadiness, RecipeSubmissionError } from "../../../../lib/recipe-submissions";
 
@@ -52,7 +52,7 @@ export const POST: APIRoute = async ({ request, cookies, locals, params }) => {
 
   try {
     const changeSet = action === "request_changes"
-      ? await requestPublishedRecipeChangeSetChanges({
+      ? await requestRecipeChangeSetConflictResolution({
         changeSetId,
         actorId: locals.user.id,
         expectedRevision,
