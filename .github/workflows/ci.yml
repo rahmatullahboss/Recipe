@@ -33,4 +33,4 @@ jobs:
         run: npm run build
 
       - name: Validate Wrangler production bundle
-        run: npx wrangler deploy --dry-run --config wrangler.jsonc --outdir .wrangler/dry-run
+        run: npx wrangler deploy --dry-run --config wrangler.jsonc
