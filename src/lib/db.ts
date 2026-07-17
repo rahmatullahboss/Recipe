@@ -53,12 +53,46 @@ export type Category = {
 
 type OptionalBindings = { DB?: D1Database };
 
+type RecipeListOptions = {
+  search?: string;
+  featured?: boolean;
+  limit?: number;
+  country?: string;
+};
+
 function getDatabase(): D1Database | undefined {
   return (env as unknown as OptionalBindings).DB;
 }
 
 export function hasDatabase(): boolean {
   return Boolean(getDatabase());
+}
+
+function listFallbackRecipes(options: RecipeListOptions = {}): RecipeSummary[] {
+  const search = options.search?.trim().toLowerCase();
+  const country = options.country?.trim().toUpperCase() || "US";
+  const limit = Math.min(Math.max(options.limit ?? 12, 1), 48);
+
+  return fallbackRecipes
+    .filter((recipe) => !options.featured || recipe.is_featured === 1)
+    .filter((recipe) => {
+      if (!search) return true;
+      const categoryText = recipe.categories.map((category) => category.name).join(" ");
+      return `${recipe.title} ${recipe.summary} ${recipe.description ?? ""} ${categoryText}`
+        .toLowerCase()
+        .includes(search);
+    })
+    .sort((a, b) => {
+      const aRank = a.country_code === country ? 0 : a.country_code === "GLOBAL" ? 1 : 2;
+      const bRank = b.country_code === country ? 0 : b.country_code === "GLOBAL" ? 1 : 2;
+      return aRank - bRank || b.is_featured - a.is_featured || b.average_rating - a.average_rating;
+    })
+    .slice(0, limit)
+    .map(({ description: _description, ingredients: _ingredients, steps: _steps, categories: _categories, ...recipe }) => recipe);
+}
+
+function getFallbackRecipeBySlug(slug: string): RecipeDetail | null {
+  return fallbackRecipes.find((recipe) => recipe.slug === slug) ?? null;
 }
 
 const summarySelect = `
@@ -84,37 +118,13 @@ const summarySelect = `
   JOIN users u ON u.id = r.author_id
 `;
 
-export async function listRecipes(options: {
-  search?: string;
-  featured?: boolean;
-  limit?: number;
-  country?: string;
-} = {}): Promise<RecipeSummary[]> {
+export async function listRecipes(options: RecipeListOptions = {}): Promise<RecipeSummary[]> {
+  const database = getDatabase();
+  if (!database) return listFallbackRecipes(options);
+
   const search = options.search?.trim();
   const country = options.country?.trim().toUpperCase() || "US";
   const limit = Math.min(Math.max(options.limit ?? 12, 1), 48);
-  const database = getDatabase();
-
-  if (!database) {
-    const searchTerm = search?.toLowerCase();
-    return fallbackRecipes
-      .filter((recipe) => !options.featured || recipe.is_featured === 1)
-      .filter((recipe) => {
-        if (!searchTerm) return true;
-        const categoryText = recipe.categories.map((category) => category.name).join(" ");
-        return `${recipe.title} ${recipe.summary} ${recipe.description ?? ""} ${categoryText}`
-          .toLowerCase()
-          .includes(searchTerm);
-      })
-      .sort((a, b) => {
-        const aRank = a.country_code === country ? 0 : a.country_code === "GLOBAL" ? 1 : 2;
-        const bRank = b.country_code === country ? 0 : b.country_code === "GLOBAL" ? 1 : 2;
-        return aRank - bRank || b.is_featured - a.is_featured || b.average_rating - a.average_rating;
-      })
-      .slice(0, limit)
-      .map(({ description: _description, ingredients: _ingredients, steps: _steps, categories: _categories, ...recipe }) => recipe);
-  }
-
   const conditions = ["r.status = 'published'"];
   const bindings: Array<string | number> = [];
 
@@ -137,77 +147,93 @@ export async function listRecipes(options: {
       r.created_at DESC
     LIMIT ?`;
 
-  const result = await database.prepare(query).bind(...bindings).all<RecipeSummary>();
-  return result.results ?? [];
+  try {
+    const result = await database.prepare(query).bind(...bindings).all<RecipeSummary>();
+    return result.results ?? [];
+  } catch (error) {
+    console.error("D1 recipe query failed; serving the static fallback catalogue.", error);
+    return listFallbackRecipes(options);
+  }
 }
 
 export async function listCategories(limit = 12): Promise<Category[]> {
+  const boundedLimit = Math.min(Math.max(limit, 1), 30);
   const database = getDatabase();
-  if (!database) return fallbackCategories.slice(0, Math.min(Math.max(limit, 1), 30));
+  if (!database) return fallbackCategories.slice(0, boundedLimit);
 
-  const result = await database
-    .prepare(
-      `SELECT id, name, slug, type
-       FROM categories
-       ORDER BY sort_order ASC, name ASC
-       LIMIT ?`,
-    )
-    .bind(Math.min(Math.max(limit, 1), 30))
-    .all<Category>();
+  try {
+    const result = await database
+      .prepare(
+        `SELECT id, name, slug, type
+         FROM categories
+         ORDER BY sort_order ASC, name ASC
+         LIMIT ?`,
+      )
+      .bind(boundedLimit)
+      .all<Category>();
 
-  return result.results ?? [];
+    return result.results ?? [];
+  } catch (error) {
+    console.error("D1 category query failed; serving fallback categories.", error);
+    return fallbackCategories.slice(0, boundedLimit);
+  }
 }
 
 export async function getRecipeBySlug(slug: string): Promise<RecipeDetail | null> {
   const database = getDatabase();
-  if (!database) return fallbackRecipes.find((recipe) => recipe.slug === slug) ?? null;
+  if (!database) return getFallbackRecipeBySlug(slug);
 
-  const recipe = await database
-    .prepare(
-      `${summarySelect}
-       WHERE r.slug = ? AND r.status = 'published'
-       LIMIT 1`,
-    )
-    .bind(slug)
-    .first<RecipeSummary & { description: string | null }>();
-
-  if (!recipe) return null;
-
-  const [ingredientsResult, stepsResult, categoriesResult] = await Promise.all([
-    database
+  try {
+    const recipe = await database
       .prepare(
-        `SELECT id, item, amount, unit, note, sort_order
-         FROM recipe_ingredients
-         WHERE recipe_id = ?
-         ORDER BY sort_order ASC`,
+        `${summarySelect}
+         WHERE r.slug = ? AND r.status = 'published'
+         LIMIT 1`,
       )
-      .bind(recipe.id)
-      .all<RecipeIngredient>(),
-    database
-      .prepare(
-        `SELECT id, instruction, image_key, timer_seconds, sort_order
-         FROM recipe_steps
-         WHERE recipe_id = ?
-         ORDER BY sort_order ASC`,
-      )
-      .bind(recipe.id)
-      .all<RecipeStep>(),
-    database
-      .prepare(
-        `SELECT c.name, c.slug, c.type
-         FROM categories c
-         JOIN recipe_categories rc ON rc.category_id = c.id
-         WHERE rc.recipe_id = ?
-         ORDER BY c.sort_order ASC, c.name ASC`,
-      )
-      .bind(recipe.id)
-      .all<{ name: string; slug: string; type: string }>(),
-  ]);
+      .bind(slug)
+      .first<RecipeSummary & { description: string | null }>();
 
-  return {
-    ...recipe,
-    ingredients: ingredientsResult.results ?? [],
-    steps: stepsResult.results ?? [],
-    categories: categoriesResult.results ?? [],
-  };
+    if (!recipe) return getFallbackRecipeBySlug(slug);
+
+    const [ingredientsResult, stepsResult, categoriesResult] = await Promise.all([
+      database
+        .prepare(
+          `SELECT id, item, amount, unit, note, sort_order
+           FROM recipe_ingredients
+           WHERE recipe_id = ?
+           ORDER BY sort_order ASC`,
+        )
+        .bind(recipe.id)
+        .all<RecipeIngredient>(),
+      database
+        .prepare(
+          `SELECT id, instruction, image_key, timer_seconds, sort_order
+           FROM recipe_steps
+           WHERE recipe_id = ?
+           ORDER BY sort_order ASC`,
+        )
+        .bind(recipe.id)
+        .all<RecipeStep>(),
+      database
+        .prepare(
+          `SELECT c.name, c.slug, c.type
+           FROM categories c
+           JOIN recipe_categories rc ON rc.category_id = c.id
+           WHERE rc.recipe_id = ?
+           ORDER BY c.sort_order ASC, c.name ASC`,
+        )
+        .bind(recipe.id)
+        .all<{ name: string; slug: string; type: string }>(),
+    ]);
+
+    return {
+      ...recipe,
+      ingredients: ingredientsResult.results ?? [],
+      steps: stepsResult.results ?? [],
+      categories: categoriesResult.results ?? [],
+    };
+  } catch (error) {
+    console.error("D1 recipe detail query failed; serving the static fallback recipe.", error);
+    return getFallbackRecipeBySlug(slug);
+  }
 }
