@@ -1,0 +1,84 @@
+---
+import BaseLayout from "../../../layouts/BaseLayout.astro";
+import { getRecipeBySlug } from "../../../lib/db";
+
+const slug = Astro.params.slug;
+const recipe = slug ? await getRecipeBySlug(slug) : null;
+
+if (!recipe) {
+  return Astro.rewrite("/404");
+}
+
+const cookData = JSON.stringify({
+  slug: recipe.slug,
+  title: recipe.title,
+  steps: recipe.steps.map((step) => ({
+    instruction: step.instruction,
+    timerSeconds: step.timer_seconds,
+  })),
+}).replace(/</g, "\\u003c");
+---
+
+<BaseLayout
+  title={`Cook ${recipe.title} — Ozzyl Recipes`}
+  description={`Guided step-by-step cooking mode for ${recipe.title}.`}
+  robots="noindex,nofollow"
+>
+  <section class="cook-shell" data-cooking-mode>
+    <div class="container">
+      <div class="cook-topbar">
+        <div>
+          <p class="eyebrow">Guided cooking mode</p>
+          <h1 class="section-title">{recipe.title}</h1>
+        </div>
+        <div class="cook-progress">
+          <label for="cook-progress">Step <span data-cook-current>1</span> of {recipe.steps.length}</label>
+          <progress id="cook-progress" max={recipe.steps.length} value="1" data-cook-progress></progress>
+        </div>
+        <a class="button button--ghost" href={`/recipes/${recipe.slug}`}>Exit cooking mode</a>
+      </div>
+
+      <div class="cook-layout">
+        <aside class="cook-panel">
+          <h2>Ingredients</h2>
+          <p class="conversion-note">Check ingredients as you prepare them. Progress is kept for this browser tab.</p>
+          <ul class="cook-ingredient-list">
+            {recipe.ingredients.map((ingredient, index) => (
+              <li>
+                <label>
+                  <input type="checkbox" data-cook-ingredient={index} />
+                  <span>{[ingredient.amount, ingredient.unit, ingredient.item].filter(Boolean).join(" ")}{ingredient.note ? ` — ${ingredient.note}` : ""}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </aside>
+
+        <article class="cook-step-card">
+          <p class="cook-step-number" data-cook-step-number>Step 1</p>
+          <p class="cook-step-text" data-cook-step-text></p>
+
+          <section class="cook-timer" data-cook-timer hidden>
+            <p class="eyebrow">Step timer</p>
+            <p class="cook-timer__display" data-timer-display aria-live="polite">00:00</p>
+            <div class="timer-controls">
+              <button class="button" type="button" data-timer-start>Start</button>
+              <button class="button button--ghost" type="button" data-timer-pause>Pause</button>
+              <button class="button button--ghost" type="button" data-timer-reset>Reset</button>
+            </div>
+          </section>
+
+          <p class="conversion-note" data-cook-status aria-live="polite"></p>
+
+          <div class="cook-navigation">
+            <button class="button button--ghost" type="button" data-cook-previous>Previous step</button>
+            <button class="button" type="button" data-cook-next>Next step</button>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <script id="cook-data" type="application/json" set:html={cookData}></script>
+  <script src="/scripts/cooking-mode.js" defer></script>
+</BaseLayout>
