@@ -19,12 +19,12 @@ CREATE TABLE recipe_publication_events (
   recipe_id TEXT NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
   actor_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   action TEXT NOT NULL CHECK (action IN (
-    'scheduled',
-    'schedule_cancelled',
+    'schedule',
+    'cancel_schedule',
     'published_now',
     'scheduled_published',
-    'archived',
-    'archive_restored'
+    'archive',
+    'restore'
   )),
   expected_revision INTEGER NOT NULL CHECK (expected_revision >= 1),
   resulting_revision INTEGER NOT NULL CHECK (resulting_revision >= 1),
