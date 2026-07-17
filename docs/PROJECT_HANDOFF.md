@@ -10,7 +10,7 @@ Always fetch current PR metadata and each current blob SHA before writing. Docum
 - Branch: `feat/cloudflare-recipe-foundation`
 - Pull request: `#1`
 - PR remains open and unmerged.
-- Private published-recipe change-set implementation reached head `e71f4b37a0af63f0e4804a7d3d911223b9a994c4` and passed CI run `#336`.
+- Editor-authored proposal and historical-restore implementation reached head `c651f235dc40387e852ae0de1e865df746731fb7` and passed CI run `#356`.
 - Documentation commits followed; fetch the exact current head and verify its CI before further work.
 
 ## Production boundary
@@ -24,7 +24,7 @@ The public application remains D1-free. Checked-in D1 configuration keeps every 
 "RECIPE_SUBMISSIONS_ENABLED": "false"
 ```
 
-No deployment, D1 activation, account provisioning, real upload, real recipe creation/submission/change-set operation/scheduling/publication, moderation decision, archive restoration, merge, or production change was performed.
+No deployment, D1 activation, account provisioning, real upload, real recipe/change-set/historical-restore operation, scheduling/publication, moderation decision, archive restoration, merge, or production change was performed.
 
 ## Completed platform foundation
 
@@ -32,7 +32,7 @@ No deployment, D1 activation, account provisioning, real upload, real recipe cre
 
 - Astro 7 SSR on Cloudflare Workers
 - D1-free fallback catalogue for ten initial markets
-- Market-aware discovery, search/API, taxonomy pages, structured data, sitemap, robots, and real 404s
+- Market-aware discovery/search/API/taxonomy, structured data, sitemap, robots, and real 404s
 - Serving scaling, measurement conversion, print/copy, saved recipes, shopping list, meal plan, and guided cooking
 - PWA manifest, service worker, offline fallback, and private/API/media cache exclusions
 
@@ -40,66 +40,48 @@ No deployment, D1 activation, account provisioning, real upload, real recipe cre
 
 - Case-insensitive D1 identities and lifecycle states
 - PBKDF2-HMAC-SHA256 with 600,000 iterations, unique salt, and server-only pepper
-- Verified-active-only KV sessions and production host cookie
-- D1 session revocation version
+- Verified-active-only KV sessions, production host cookie, and D1 session revocation version
 - Purpose-bound signed CSRF, same-origin checks, rate limits, Turnstile, lockout, verification token digests, consent, OAuth extension, and privacy-preserving audit events
-- Independent authentication and registration flags
+- Independent authentication, registration, media, and recipe-write flags
 
-### Private media and privacy-safe derivatives
+### Private media and derivatives
 
-- One-time D1 upload intents and server-generated private R2 keys
-- JPEG/PNG/WebP validation, 8 MiB limit, dimension/40 MP/signature/MIME/size/checksum checks
+- One-time upload intents and server-generated private R2 keys
+- JPEG/PNG/WebP validation, SVG rejection, 8 MiB/dimension/40 MP/signature/MIME/size/checksum gates
 - EXIF orientation parsing and normalized dimensions
 - `recipe-images-v1` 320/640/960/1280 variants without upscaling
 - Required JPEG/WebP and optional exact-MIME AVIF through 960 px
-- Generated-byte metadata scanners
-- Deterministic policy/checksum keys and D1 generation leases
-- Source/output checksum and R2 ETag validation
+- Generated metadata scanners, deterministic policy/checksum keys, generation leases, output checksum/ETag validation
 - Original bytes never served by `/media`
 - Owner/editor derivative-only `private, no-store` previews
 - Public delivery only for uploaded/approved parents with complete current derivatives
 - Guarded regeneration, cross-table media reservation, and rejection/quarantine/deletion cleanup
 
-### Initial contributor/editorial recipes
+### Initial submission, correction, publication, and restoration
 
 - Atomic first submission into private `review`
 - Public D1 reads restricted to `published`
-- Editor/admin queue and detailed review
-- Request changes and owner-only `review → draft → review` correction
+- Editor/admin review, request changes, publish, schedule, archive, and restore-to-review
+- Owner-only `review → draft → review` correction
 - Separate optimistic `revision` and `content_revision`
-- Temporary unique `revision_write_token` guards relational replacement
+- Temporary unique `revision_write_token` guards normalized replacement
 - Immutable `recipe_revision_snapshots`
-- Final publication rechecks complete content, approved media, source checksum, derivative policy, and required derivative matrix
+- Immediate and due publication repeat complete content/approved-media/checksum/derivative gates
+- Guarded manual due processor is bounded, deterministic, idempotent, and editor/admin-only
+- Restore is only `archived → review`; automatic Cron/queue execution is not configured
 
-### Scheduled publication and archive restoration
-
-Migration `0009_recipe_publication_workflow` adds future UTC schedule/replace/cancel, `schedule_revision`, due/archived indexes, archive/restore timestamps, and `recipe_publication_events`.
-
-- Scheduled recipes remain private in `review`.
-- Active schedule requires `schedule_revision = revision`.
-- Immediate and due publication repeat complete content/media/checksum/derivative gates in the final D1 update.
-- `POST /api/recipes/scheduled/process` is editor/admin, same-origin, purpose/session-CSRF protected, bounded, deterministic, and idempotent.
-- Archive clears schedule state.
-- Restore is only `archived → review` and never republishes directly.
-- Automatic Cron/queue execution is not configured.
-
-## Private published-recipe change sets completed
+## Contributor private published-recipe change sets
 
 Migration `0010_published_recipe_change_sets` adds:
 
-- `recipe_change_sets`;
-- `recipe_change_set_events`;
+- `recipe_change_sets` and `recipe_change_set_events`;
 - exact `base_recipe_revision` and `base_content_revision`;
 - private `base_content_json` and proposed `content_json`;
 - one-active-change-set-per-recipe uniqueness;
-- active media reservation uniqueness;
-- contributor/editor queue indexes;
-- published-owner triggers;
-- cross-table recipe/change-set media reservation triggers.
+- active media reservation uniqueness and cross-table triggers;
+- published-owner and contributor/editor queue protections.
 
-### Live-row isolation
-
-A contributor update to an already published recipe is never written into the live recipe while drafting or reviewing.
+A contributor update to an already published recipe is never written into live content while drafting or reviewing.
 
 ```text
 published live recipe remains unchanged
@@ -110,61 +92,81 @@ published live recipe remains unchanged
        → or cancelled
 ```
 
-Create/save/submit/request-changes/cancel modify only private change-set state and audit history.
+Contributor actions are create/save/submit/cancel. Editorial actions are request changes/approve/cancel. All require verified identity/role, same-origin, purpose/session CSRF, limits, optimistic revisions, exact live base, canonical content/categories, and eligible owner media.
 
-### Contributor surfaces
+Approval revalidates live `published` status, exact base revisions, canonical proposed JSON/categories, owner media approval/checksum/current `recipe-images-v1` derivatives, and reservation state. One D1 batch uses a unique `revision_write_token` to update scalar/media fields, increment live recipe/content revisions, clear stale scheduling, replace categories/ingredients/directions, approve/audit the change set, and clear the token. Any failure rolls back the complete operation.
 
-- `/account/submissions`
-- `/account/submissions/:id/change-set`
-- `POST /api/recipes/:id/change-set`
+## Editor-authored proposals and historical restoration completed
 
-Contributor actions are `create`, `save`, `submit`, and `cancel`. They require verified ownership, same-origin request, purpose/session CSRF, rate/body limits, canonical validation, matching optimistic change-set revision, exact live base revisions, valid categories, and eligible non-conflicting media.
+### Migration `0011_editor_change_set_origins`
 
-### Editorial surfaces
+Adds immutable `recipe_change_set_origins` records with source types:
 
-- `/admin/recipe-change-sets`
-- `/admin/recipe-change-sets/:id`
-- `POST /api/recipe-change-sets/:id/editorial`
+```text
+editor_current
+revision_snapshot
+approved_change_set_proposed
+approved_change_set_baseline
+```
 
-Editorial actions are `request_changes`, `approve`, and `cancel`. The private detail compares baseline/proposed scalar fields, categories, ingredients, directions, media, notes, revisions, and audit events.
+Origin metadata records source audit pointers, historical content revision, whether safe media fallback occurred, editor/admin creator, and timestamp. D1 triggers require editor/admin creator identity, require origin creator to match `recipe_change_sets.created_by`, and reject origin updates.
 
-### Atomic promotion
+Source snapshot/change-set IDs are immutable audit pointers rather than cascading foreign keys, avoiding cyclic deletion dependencies with historical change sets.
 
-Approval revalidates:
+### Current and historical sources
 
-- change-set review status/revision;
-- live recipe still `published`;
-- exact base recipe/content revisions;
-- canonical proposed JSON and categories;
-- proposed media ownership, uploaded/approved state, current checksum, `recipe-images-v1` derivative policy, and complete mandatory variants;
-- no conflicting media assignment/reservation.
+Editors can create a private proposal from:
 
-One D1 batch acquires a unique `revision_write_token`, updates live scalar/media fields while preserving `published`, increments recipe/content revisions, clears stale scheduling, guardedly replaces categories/ingredients/directions, approves the change set, records the resulting recipe revision/audit event, and clears the token.
+- the current normalized live recipe;
+- a `recipe_revision_snapshots` row;
+- proposed JSON from an approved change set;
+- baseline JSON captured before an approved change set.
 
-A stale first update causes every relational statement to no-op. Any failed statement rolls back the complete batch. Public content cannot be partially replaced.
+The current live recipe always becomes the new private baseline. Historical content becomes only proposed JSON. Historical JSON is passed through the current canonical validator and category table. No restore action directly changes public content.
 
-### Media reservation
+### Media and ownership
 
-Active proposed media cannot be assigned to another recipe/change set or deleted. Cross-table D1 triggers protect existing submission/revision paths, and the media delete endpoint checks both live recipe assignments and active change-set reservations.
+Editors cannot upload on behalf of a contributor. They may select only eligible `recipe_hero` media owned by the recipe owner, with current ready derivatives and no assignment/reservation conflict.
+
+If historical media is no longer eligible, the service attempts to use current eligible owner media and records `media_fallback_applied=1`. If no eligible media exists, a private draft may be created/saved with null media, but submission to review is blocked.
+
+### Control boundary
+
+An origin-backed status `draft` is editor-controlled.
+
+- Contributor UI is read-only.
+- Contributor API save/submit/cancel returns `403`.
+- Editor service refuses contributor-controlled drafts.
+- Editor save/submit/cancel requires editor/admin role, exact live/change-set revisions, canonical content/categories, same-origin, purpose/session CSRF, and limits.
+- After editor submission, the existing independent review queue and shared approval service are used.
+- If a reviewer requests changes, status becomes `changes_requested` and contributor control opens through the existing owner editor.
+
+### Surfaces
+
+- `/admin/recipe-change-sets` — review queue and published recipe proposal launcher
+- `/admin/recipes/:id/change-set` — current-live/historical private editor workspace
+- `POST /api/recipes/:id/editor-change-set` — create/restore/save/submit/cancel
+- `/admin/recipe-change-sets/:id` — existing comparison, audit, request-changes, and approval
+- `/account/submissions/:id/change-set` — owner workflow plus read-only editor-draft view
+
+All private pages/APIs are no-store/noindex where applicable.
 
 ## Health and activation hardening
 
 `/api/health` reports non-secret capabilities for:
 
-- scheduled publishing and guarded manual processing;
-- archive restoration;
-- schedule revision/media/atomic promotion gates;
-- automatic schedule cron disabled;
-- live published-row isolation;
-- one active published change set;
-- private baseline/proposed snapshots;
-- change-set optimistic and base guards;
-- media reservation;
-- approval-time media/derivative revalidation;
-- atomic normalized promotion;
-- immutable change-set audit events.
+- scheduling/manual processor/archive restoration and automatic Cron disabled;
+- published live-row isolation, one-active guard, private JSON, optimistic/base guards;
+- media reservation, approval media/derivative revalidation, atomic normalized promotion, immutable events;
+- editor-authored published proposals;
+- historical snapshot restore;
+- immutable editor origin audit;
+- contributor lock on editor-controlled drafts;
+- current-live baseline capture;
+- historical-media fallback;
+- shared atomic approval.
 
-The guarded authentication workflow fails closed if recipe writes are requested while any required capability is absent.
+The guarded authentication workflow fails closed if recipe writes are requested while any capability is absent.
 
 ## Authoritative migration chain
 
@@ -179,19 +181,20 @@ migrations/d1/0007_recipe_revisions/migration.sql
 migrations/d1/0008_media_derivatives/migration.sql
 migrations/d1/0009_recipe_publication_workflow/migration.sql
 migrations/d1/0010_published_recipe_change_sets/migration.sql
+migrations/d1/0011_editor_change_set_origins/migration.sql
 ```
 
 Wrangler applies only this nested sequence. Root SQL files remain legacy references.
 
 ## Validation evidence
 
-Implementation head `e71f4b37a0af63f0e4804a7d3d911223b9a994c4` passed GitHub Actions CI run `#336`:
+Implementation head `c651f235dc40387e852ae0de1e865df746731fb7` passed GitHub Actions CI run `#356`:
 
 - checkout and Node.js 24 setup;
 - locked dependency installation;
-- project/security/change-set validation;
+- project/security/editor-change-set validation;
 - operational script validation;
-- all ten local D1 migrations;
+- all eleven migrations on fresh local D1 state;
 - D1-free Worker build;
 - D1 Worker build.
 
@@ -209,18 +212,18 @@ After documentation updates, verify CI again on the exact current PR head before
 - `docs/RECIPE_EDITORIAL.md`
 - `docs/RECIPE_PUBLICATION_WORKFLOW.md`
 - `docs/PUBLISHED_RECIPE_CHANGE_SETS.md`
+- `docs/EDITOR_RECIPE_CHANGE_SETS.md`
 
 ## Remaining boundaries and recommended next work
 
-1. Execute controlled non-production acceptance for media derivatives, submissions, corrections, scheduling, archive/restore, private published change sets, media reservations, concurrency, and rollback.
-2. Add editor-authored private change sets using the same live-row isolation and atomic promotion guarantees.
-3. Restore a historical recipe snapshot into a new private change set.
-4. Add richer three-way conflict comparison or merge assistance without weakening optimistic rejection.
-5. Add optional Cron/queue scheduling only after manual processor and incident procedures are accepted.
-6. Add malware/semantic scanning and approved retention/legal policies.
-7. Add account lifecycle and synchronized kitchen/community features.
+1. Execute controlled non-production acceptance for media derivatives, submissions/corrections, scheduling, archive/restore, contributor/editor private proposals, historical restoration, media fallback/reservations, concurrency, and rollback.
+2. Add richer three-way conflict comparison or merge assistance without weakening optimistic conflict rejection.
+3. Add optional Cron/queue scheduling only after manual processor and incident procedures are accepted.
+4. Add malware/semantic scanning and approved retention/legal/moderation policies.
+5. Add account lifecycle and synchronized kitchen/community features.
+6. Add taxonomy/localization/nutrition administration, indexing, recommendations, analytics, and advertising controls.
 
-Do not directly mutate a live published recipe for future editor or snapshot-restoration features.
+Do not directly mutate a live published recipe for future conflict-resolution or restoration features.
 
 ## Continuation rules
 
@@ -229,8 +232,8 @@ Do not directly mutate a live published recipe for future editor or snapshot-res
 3. Fetch the current blob SHA immediately before every existing-file update.
 4. Do not make no-op updates or update one path concurrently.
 5. Keep all four checked-in flags false.
-6. Do not deploy, activate D1, provision accounts, upload media, create/revise/schedule/publish real recipes, moderate, restore real content, merge, or change production unless explicitly requested.
-7. Preserve ownership, approved derivative delivery, private no-store previews, published-only public reads, checksums/ETags, generation leases, media reservations, schedule revisions, optimistic base guards, and atomic D1 safety.
+6. Do not deploy, activate D1, provision accounts, upload media, create/restore/revise/schedule/publish real recipes, moderate, merge, or change production unless explicitly requested.
+7. Preserve ownership, approved derivative delivery, private no-store previews, published-only reads, checksums/ETags, generation leases, media reservations, schedule revisions, optimistic base guards, immutable origins, contributor/editor control boundaries, and atomic D1 safety.
 8. Run and verify CI on the final head.
 
 ## Ready-to-paste continuation prompt
@@ -244,9 +247,9 @@ Pull request: #1
 
 Fetch the current PR head and current file blob SHAs before writing. Read README.md and every document referenced by docs/PROJECT_HANDOFF.md.
 
-The project includes Astro 7/Cloudflare international discovery, D1-free fallback data, cooking/planning/offline tools, guarded authentication, private R2 originals, privacy-safe responsive derivatives, approval-gated derivative-only delivery, atomic initial recipe submission, requested corrections, immutable snapshots, immediate/future publication, guarded manual due processing, archive restoration, and private contributor change sets for already published recipes through migration 0010.
+The project includes Astro 7/Cloudflare international discovery, D1-free fallback data, cooking/planning/offline tools, guarded authentication, private R2 originals, privacy-safe derivatives, initial submission/correction/publication/scheduling/archive restoration, contributor private published-recipe change sets, editor-authored private proposals, and historical snapshot restoration through migration 0011.
 
-Private published change sets keep the live published row unchanged during drafting/review, reserve proposed media, capture exact base recipe/content revisions, and use approval-time media/derivative revalidation plus revision_write_token-guarded atomic normalized promotion.
+All published-recipe proposals keep live content unchanged until shared approval-time owner/media/checksum/derivative/base revalidation and revision_write_token-guarded atomic normalized promotion. Editor-controlled drafts are contributor read-only; historical content becomes only proposed JSON with recorded safe media fallback.
 
-Continue with controlled runtime acceptance, editor-authored private change sets, or restoring historical snapshots into new private change sets. Keep all checked-in flags false; do not deploy, activate, provision, upload, moderate, create/revise/schedule/publish real content, merge, or change production. Verify CI on the final head.
+Continue with controlled runtime acceptance or richer three-way conflict comparison/merge assistance. Keep all checked-in flags false; do not deploy, activate, provision, upload, moderate, create/restore/revise/schedule/publish real content, merge, or change production. Verify CI on the final head.
 ```
