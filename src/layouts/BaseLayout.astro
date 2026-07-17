@@ -1,6 +1,7 @@
 ---
 import "../styles/global.css";
 import "../styles/market.css";
+import "../styles/discovery.css";
 import { markets, resolveMarket } from "../lib/market";
 
 type Props = {
@@ -47,8 +48,8 @@ const returnTo = `${Astro.url.pathname}${Astro.url.search}`;
         <nav class="main-nav" aria-label="Main navigation">
           <a href="/search">Recipes</a>
           <a href="/search?q=quick">Quick & Easy</a>
+          <a href="/categories">Categories</a>
           <a href="/markets">Markets</a>
-          <a href="/search?q=European">Cuisines</a>
         </nav>
         <div class="nav-actions">
           <form class="market-form" action="/api/location" method="post">
@@ -84,7 +85,7 @@ const returnTo = `${Astro.url.pathname}${Astro.url.search}`;
         </div>
         <div>
           <strong>Explore</strong>
-          <p class="footer-copy"><a href="/search">All recipes</a> · <a href="/markets">Markets</a> · <a href="/about">About</a> · <a href="/privacy">Privacy</a></p>
+          <p class="footer-copy"><a href="/search">All recipes</a> · <a href="/categories">Categories</a> · <a href="/markets">Markets</a> · <a href="/about">About</a> · <a href="/privacy">Privacy</a></p>
         </div>
       </div>
     </footer>
