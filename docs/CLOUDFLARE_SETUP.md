@@ -150,9 +150,12 @@ The workflow will:
 ```bash
 npm ci
 npm run build:d1
-wrangler d1 migrations apply DB --remote --config wrangler.d1.jsonc
+wrangler deploy --config wrangler.d1.jsonc
+d1 migrations apply DB --remote --config wrangler.d1.jsonc
 wrangler deploy --config wrangler.d1.jsonc
 ```
+
+The first deployment provisions the draft D1 binding. Until the schema exists, database queries automatically fall back to the versioned static catalogue. The workflow then applies all pending migrations and performs a final deployment against the migrated database.
 
 The D1 config uses the `DB` binding and the migrations in `migrations/`.
 
@@ -169,7 +172,8 @@ After deployment, `/api/health` should return:
 - Cloudflare Worker deployments can be rolled back from the Worker deployment history.
 - D1 creates a backup before applying migrations.
 - A failed D1 migration is rolled back while earlier successful migrations remain applied.
-- The static fallback catalogue remains in the repository, so the D1-free config can be redeployed if the database is temporarily unavailable.
+- If a D1 query fails, public discovery routes fall back to the versioned static catalogue.
+- The D1-free configuration can be redeployed if the database is temporarily unavailable.
 
 ## 11. Do not add yet
 
