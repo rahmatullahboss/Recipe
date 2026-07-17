@@ -49,6 +49,7 @@ const schema = {
       }
     : undefined,
 };
+const schemaJson = JSON.stringify(schema).replace(/</g, "\\u003c");
 ---
 
 <BaseLayout
@@ -56,7 +57,7 @@ const schema = {
   description={recipe.summary}
   image={recipe.image_url ?? undefined}
 >
-  <script type="application/ld+json" set:html={JSON.stringify(schema)}></script>
+  <script type="application/ld+json" set:html={schemaJson}></script>
 
   <div
     data-recipe-tools
