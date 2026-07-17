@@ -1,6 +1,9 @@
 import { env } from "cloudflare:workers";
 import { fallbackCategories, fallbackRecipes } from "../data/fallback-recipes";
 
+export type RecipeDifficulty = "easy" | "medium" | "hard";
+export type RecipeSort = "recommended" | "rating" | "quickest" | "popular";
+
 export type RecipeSummary = {
   id: string;
   title: string;
@@ -10,7 +13,7 @@ export type RecipeSummary = {
   prep_minutes: number;
   cook_minutes: number;
   servings: number;
-  difficulty: "easy" | "medium" | "hard";
+  difficulty: RecipeDifficulty;
   average_rating: number;
   rating_count: number;
   save_count: number;
@@ -51,14 +54,18 @@ export type Category = {
   type: string;
 };
 
-type OptionalBindings = { DB?: D1Database };
-
-type RecipeListOptions = {
+export type RecipeListOptions = {
   search?: string;
   featured?: boolean;
   limit?: number;
   country?: string;
+  category?: string;
+  difficulty?: RecipeDifficulty;
+  maxTotalMinutes?: number;
+  sort?: RecipeSort;
 };
+
+type OptionalBindings = { DB?: D1Database };
 
 function getDatabase(): D1Database | undefined {
   return (env as unknown as OptionalBindings).DB;
@@ -68,24 +75,60 @@ export function hasDatabase(): boolean {
   return Boolean(getDatabase());
 }
 
+function rankForCountry(recipe: RecipeSummary, country: string): number {
+  if (recipe.country_code === country) return 0;
+  if (recipe.country_code === "GLOBAL") return 1;
+  return 2;
+}
+
 function listFallbackRecipes(options: RecipeListOptions = {}): RecipeSummary[] {
   const search = options.search?.trim().toLowerCase();
+  const category = options.category?.trim().toLowerCase();
   const country = options.country?.trim().toUpperCase() || "US";
   const limit = Math.min(Math.max(options.limit ?? 12, 1), 48);
+  const sort = options.sort ?? "recommended";
+  const maxTotalMinutes = Number.isFinite(options.maxTotalMinutes)
+    ? Math.max(Number(options.maxTotalMinutes), 1)
+    : undefined;
 
   return fallbackRecipes
     .filter((recipe) => !options.featured || recipe.is_featured === 1)
+    .filter((recipe) => !options.difficulty || recipe.difficulty === options.difficulty)
+    .filter((recipe) => !maxTotalMinutes || recipe.prep_minutes + recipe.cook_minutes <= maxTotalMinutes)
+    .filter((recipe) => {
+      if (!category) return true;
+      return recipe.categories.some(
+        (item) => item.slug.toLowerCase() === category || item.name.toLowerCase() === category,
+      );
+    })
     .filter((recipe) => {
       if (!search) return true;
-      const categoryText = recipe.categories.map((category) => category.name).join(" ");
-      return `${recipe.title} ${recipe.summary} ${recipe.description ?? ""} ${categoryText}`
+      const categoryText = recipe.categories.map((item) => item.name).join(" ");
+      const ingredientText = recipe.ingredients.map((ingredient) => ingredient.item).join(" ");
+      return `${recipe.title} ${recipe.summary} ${recipe.description ?? ""} ${categoryText} ${ingredientText}`
         .toLowerCase()
         .includes(search);
     })
     .sort((a, b) => {
-      const aRank = a.country_code === country ? 0 : a.country_code === "GLOBAL" ? 1 : 2;
-      const bRank = b.country_code === country ? 0 : b.country_code === "GLOBAL" ? 1 : 2;
-      return aRank - bRank || b.is_featured - a.is_featured || b.average_rating - a.average_rating;
+      const marketRank = rankForCountry(a, country) - rankForCountry(b, country);
+      if (marketRank !== 0) return marketRank;
+
+      if (sort === "rating") {
+        return b.average_rating - a.average_rating || b.rating_count - a.rating_count;
+      }
+
+      if (sort === "quickest") {
+        return a.prep_minutes + a.cook_minutes - (b.prep_minutes + b.cook_minutes)
+          || b.average_rating - a.average_rating;
+      }
+
+      if (sort === "popular") {
+        return b.view_count - a.view_count || b.save_count - a.save_count;
+      }
+
+      return b.is_featured - a.is_featured
+        || b.average_rating - a.average_rating
+        || b.view_count - a.view_count;
     })
     .slice(0, limit)
     .map(({ description: _description, ingredients: _ingredients, steps: _steps, categories: _categories, ...recipe }) => recipe);
@@ -118,22 +161,70 @@ const summarySelect = `
   JOIN users u ON u.id = r.author_id
 `;
 
+function getSortSql(sort: RecipeSort): string {
+  if (sort === "rating") return "r.average_rating DESC, r.rating_count DESC";
+  if (sort === "quickest") return "(r.prep_minutes + r.cook_minutes) ASC, r.average_rating DESC";
+  if (sort === "popular") return "r.view_count DESC, r.save_count DESC";
+  return "r.is_featured DESC, r.average_rating DESC, r.view_count DESC, r.published_at DESC";
+}
+
 export async function listRecipes(options: RecipeListOptions = {}): Promise<RecipeSummary[]> {
   const database = getDatabase();
   if (!database) return listFallbackRecipes(options);
 
   const search = options.search?.trim();
+  const category = options.category?.trim().toLowerCase();
   const country = options.country?.trim().toUpperCase() || "US";
   const limit = Math.min(Math.max(options.limit ?? 12, 1), 48);
+  const sort = options.sort ?? "recommended";
+  const maxTotalMinutes = Number.isFinite(options.maxTotalMinutes)
+    ? Math.max(Number(options.maxTotalMinutes), 1)
+    : undefined;
   const conditions = ["r.status = 'published'"];
   const bindings: Array<string | number> = [];
 
   if (options.featured) conditions.push("r.is_featured = 1");
 
+  if (options.difficulty) {
+    conditions.push("r.difficulty = ?");
+    bindings.push(options.difficulty);
+  }
+
+  if (maxTotalMinutes) {
+    conditions.push("(r.prep_minutes + r.cook_minutes) <= ?");
+    bindings.push(maxTotalMinutes);
+  }
+
+  if (category) {
+    conditions.push(`EXISTS (
+      SELECT 1
+      FROM recipe_categories rc_filter
+      JOIN categories c_filter ON c_filter.id = rc_filter.category_id
+      WHERE rc_filter.recipe_id = r.id
+        AND (LOWER(c_filter.slug) = ? OR LOWER(c_filter.name) = ?)
+    )`);
+    bindings.push(category, category);
+  }
+
   if (search) {
-    conditions.push("(r.title LIKE ? OR r.summary LIKE ? OR r.description LIKE ?)");
+    conditions.push(`(
+      r.title LIKE ?
+      OR r.summary LIKE ?
+      OR r.description LIKE ?
+      OR EXISTS (
+        SELECT 1
+        FROM recipe_ingredients ri_search
+        WHERE ri_search.recipe_id = r.id AND ri_search.item LIKE ?
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM recipe_categories rc_search
+        JOIN categories c_search ON c_search.id = rc_search.category_id
+        WHERE rc_search.recipe_id = r.id AND c_search.name LIKE ?
+      )
+    )`);
     const term = `%${search}%`;
-    bindings.push(term, term, term);
+    bindings.push(term, term, term, term, term);
   }
 
   bindings.push(country, limit);
@@ -142,9 +233,7 @@ export async function listRecipes(options: RecipeListOptions = {}): Promise<Reci
     WHERE ${conditions.join(" AND ")}
     ORDER BY
       CASE WHEN r.country_code = ? THEN 0 WHEN r.country_code = 'GLOBAL' THEN 1 ELSE 2 END,
-      r.is_featured DESC,
-      r.published_at DESC,
-      r.created_at DESC
+      ${getSortSql(sort)}
     LIMIT ?`;
 
   try {
@@ -156,8 +245,8 @@ export async function listRecipes(options: RecipeListOptions = {}): Promise<Reci
   }
 }
 
-export async function listCategories(limit = 12): Promise<Category[]> {
-  const boundedLimit = Math.min(Math.max(limit, 1), 30);
+export async function listCategories(limit = 30): Promise<Category[]> {
+  const boundedLimit = Math.min(Math.max(limit, 1), 100);
   const database = getDatabase();
   if (!database) return fallbackCategories.slice(0, boundedLimit);
 
@@ -176,6 +265,25 @@ export async function listCategories(limit = 12): Promise<Category[]> {
   } catch (error) {
     console.error("D1 category query failed; serving fallback categories.", error);
     return fallbackCategories.slice(0, boundedLimit);
+  }
+}
+
+export async function getCategoryBySlug(slug: string): Promise<Category | null> {
+  const normalisedSlug = slug.trim().toLowerCase();
+  const database = getDatabase();
+
+  if (!database) {
+    return fallbackCategories.find((category) => category.slug.toLowerCase() === normalisedSlug) ?? null;
+  }
+
+  try {
+    return await database
+      .prepare("SELECT id, name, slug, type FROM categories WHERE LOWER(slug) = ? LIMIT 1")
+      .bind(normalisedSlug)
+      .first<Category>();
+  } catch (error) {
+    console.error("D1 category lookup failed; serving fallback category metadata.", error);
+    return fallbackCategories.find((category) => category.slug.toLowerCase() === normalisedSlug) ?? null;
   }
 }
 
