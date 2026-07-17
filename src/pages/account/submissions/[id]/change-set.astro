@@ -6,6 +6,7 @@ import {
   createRandomToken,
   getCsrfCookieOptions,
 } from "../../../../lib/auth";
+import { isEditorControlledPublishedChangeSetDraft } from "../../../../lib/editor-recipe-change-sets";
 import { getContributorPublishedChangeSetEditor } from "../../../../lib/recipe-change-sets";
 import { listCategories } from "../../../../lib/db";
 import { markets } from "../../../../lib/market";
@@ -31,14 +32,20 @@ const mediaReadiness = getMediaReadiness();
 const mediaRuntime = getMediaRuntimeStatus();
 const hasVerifiedSession = Boolean(Astro.locals.authReady && Astro.locals.user && Astro.locals.session);
 const changeSetStatus = editor?.changeSet?.status ?? null;
+const editorControlledDraft = Boolean(
+  editor?.changeSet?.id
+  && changeSetStatus === "draft"
+  && await isEditorControlledPublishedChangeSetDraft(editor.changeSet.id),
+);
 const canCreate = Boolean(editor && !editor.changeSet && hasVerifiedSession && submissionReadiness.ready);
 const canEdit = Boolean(
   editor?.changeSet
+  && !editorControlledDraft
   && (changeSetStatus === "draft" || changeSetStatus === "changes_requested")
   && hasVerifiedSession
   && submissionReadiness.ready,
 );
-const canCancel = Boolean(editor?.changeSet && hasVerifiedSession && submissionReadiness.ready);
+const canCancel = Boolean(editor?.changeSet && !editorControlledDraft && hasVerifiedSession && submissionReadiness.ready);
 const canUploadMedia = Boolean(canEdit && mediaRuntime.uploadsEnabled && mediaReadiness.ready);
 
 let nonce = Astro.cookies.get(CSRF_COOKIE)?.value;
@@ -88,7 +95,7 @@ const languageLabels: Record<string, string> = {
     data-can-create={canCreate ? "true" : "false"}
     data-can-edit={canEdit ? "true" : "false"}
     data-can-cancel={canCancel ? "true" : "false"}
-    data-storage-key={editor?.changeSet ? `ozzyl:published-change-set:${editor.changeSet.id}:v1` : ""}
+    data-storage-key={editor?.changeSet && !editorControlledDraft ? `ozzyl:published-change-set:${editor.changeSet.id}:v1` : ""}
     data-csrf={changeSetCsrf}
     data-session-csrf={sessionCsrf}
   >
@@ -112,6 +119,33 @@ const languageLabels: Record<string, string> = {
           </div>
           {!canCreate && <div class="validation-errors"><p>Published updates remain closed until the complete guarded recipe pipeline is ready.</p></div>}
           <p class="moderation-result" data-change-set-result aria-live="polite"></p>
+        </div>
+      ) : editorControlledDraft ? (
+        <div class="editor-shell">
+          <article class="editor-section">
+            <p class="eyebrow">Editorial draft in progress</p>
+            <h2>{draft.title}</h2>
+            <p>The editorial team is preparing a private proposal for your published recipe. You can view the proposal, but contributor editing and cancellation remain locked until an editor submits it or explicitly requests changes from you.</p>
+            <dl class="moderation-meta">
+              <div><dt>Change-set revision</dt><dd>{editor.changeSet.revision}</dd></div>
+              <div><dt>Base recipe revision</dt><dd>{editor.changeSet.baseRecipeRevision}</dd></div>
+              <div><dt>Base content revision</dt><dd>{editor.changeSet.baseContentRevision}</dd></div>
+              <div><dt>Status</dt><dd>editor-controlled draft</dd></div>
+            </dl>
+            <div class="editor-actions">
+              <a class="button button--ghost" href={`/recipes/${editor.recipe.slug}`}>View live recipe</a>
+              <a class="recipe-tool-button" href="/account/submissions">Back to submissions</a>
+            </div>
+          </article>
+          <aside class="editor-preview">
+            <div class="editor-preview__image">
+              {editor.media ? <img src={editor.media.previewUrl} alt={editor.media.altText || "Private proposed recipe image"} /> : <span>Private image unavailable</span>}
+            </div>
+            <p class="eyebrow">Read-only editorial proposal</p>
+            <h2>{draft.title}</h2>
+            <p>{draft.summary}</p>
+            <p class="editor-preview__meta">{draft.countryCode} · {draft.prepMinutes + draft.cookMinutes} min · {draft.servings} servings · {draft.difficulty}</p>
+          </aside>
         </div>
       ) : changeSetStatus === "review" ? (
         <div class="editor-shell">
