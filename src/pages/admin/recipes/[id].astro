@@ -32,7 +32,7 @@ const publishReady = recipe?.status === "review" && recipe?.media_upload_status 
     <div class="container">
       <p class="eyebrow">Editorial operations</p>
       <h1 class="section-title">{recipe?.title || "Recipe review"}</h1>
-      {recipe && <p class="section-copy">Submitted by {recipe.author_name} · {recipe.country_code} · {recipe.language_code} · revision {recipe.revision}</p>}
+      {recipe && <p class="section-copy">Submitted by {recipe.author_name} · {recipe.country_code} · {recipe.language_code} · lock revision {recipe.revision} · content revision {recipe.content_revision ?? 1}</p>}
     </div>
   </section>
 
@@ -85,12 +85,13 @@ const publishReady = recipe?.status === "review" && recipe?.media_upload_status 
           {recipe.status === "review" && (
             <section class="editor-section">
               <h2>Editorial decision</h2>
-              <label class="editor-field"><span>Decision note</span><textarea data-editorial-reason maxlength="1000" placeholder="Required when archiving. Optional publication note."></textarea></label>
+              <label class="editor-field"><span>Decision note</span><textarea data-editorial-reason maxlength="1000" placeholder="Required for requested changes or archive. Optional publication note."></textarea></label>
               <div class="editor-actions">
                 <button class="button" type="button" data-editorial-action="publish" disabled={!publishReady}>Publish recipe</button>
+                <button class="recipe-tool-button" type="button" data-editorial-action="request_changes">Request contributor changes</button>
                 <button class="recipe-tool-button" type="button" data-editorial-action="archive">Archive submission</button>
               </div>
-              {!publishReady && <p class="auth-help">Publishing remains blocked until the attached hero image is uploaded and approved.</p>}
+              {!publishReady && <p class="auth-help">Publishing remains blocked until the attached hero image is uploaded and approved. The editor can still request revisions.</p>}
               <p class="moderation-result" data-editorial-result aria-live="polite"></p>
             </section>
           )}
@@ -98,7 +99,7 @@ const publishReady = recipe?.status === "review" && recipe?.media_upload_status 
           <section class="editor-section">
             <h2>Editorial history</h2>
             <ol class="editorial-events">
-              {(detail.events as any[]).map((event) => <li><strong>{event.next_status}</strong> by {event.actor_name} · revision {event.revision}{event.reason ? ` — ${event.reason}` : ""}</li>)}
+              {(detail.events as any[]).map((event) => <li><strong>{event.next_status}</strong> by {event.actor_name} · lock revision {event.revision}{event.reason ? ` — ${event.reason}` : ""}</li>)}
             </ol>
           </section>
         </>
