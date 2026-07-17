@@ -18,9 +18,15 @@ const contentSecurityPolicy = [
 const privatePaths = new Set([
   "/login",
   "/saved",
+  "/meal-plan",
+  "/shopping-list",
   "/recipes/new",
   "/api/recipes/validate",
 ]);
+
+function isPrivatePath(pathname: string): boolean {
+  return privatePaths.has(pathname) || /^\/recipes\/[^/]+\/cook\/?$/.test(pathname);
+}
 
 export const onRequest = defineMiddleware(async (context, next) => {
   const response = await next();
@@ -38,7 +44,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   }
 
-  if (privatePaths.has(context.url.pathname)) {
+  if (isPrivatePath(context.url.pathname)) {
     headers.set("Cache-Control", "private, no-store");
   }
 
