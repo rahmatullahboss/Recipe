@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 import { env } from "cloudflare:workers";
 import { fallbackRecipes } from "../../data/fallback-recipes";
+import { getAuthReadiness } from "../../lib/auth";
 import { hasDatabase } from "../../lib/db";
 import { markets } from "../../lib/market";
 
@@ -15,6 +16,7 @@ type OptionalBindings = {
 export const GET: APIRoute = async () => {
   const bindings = env as unknown as OptionalBindings;
   const d1Bound = hasDatabase();
+  const auth = getAuthReadiness();
 
   return Response.json(
     {
@@ -32,6 +34,15 @@ export const GET: APIRoute = async () => {
         kv: Boolean(bindings.SESSION),
         r2: Boolean(bindings.MEDIA),
         images: Boolean(bindings.IMAGES),
+      },
+      authentication: {
+        ready: auth.ready,
+        database: auth.database,
+        sessions: auth.sessions,
+        turnstileSiteKey: auth.turnstileSiteKey,
+        turnstileSecret: auth.turnstileSecret,
+        passwordPepper: auth.passwordPepper,
+        missingCount: auth.missing.length,
       },
       timestamp: new Date().toISOString(),
     },
