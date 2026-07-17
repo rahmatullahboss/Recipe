@@ -1,0 +1,143 @@
+---
+import { env } from "cloudflare:workers";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import {
+  CSRF_COOKIE,
+  createCsrfToken,
+  createRandomToken,
+  getCsrfCookieOptions,
+} from "../../lib/auth";
+
+if (!Astro.locals.user || !Astro.locals.session) {
+  return Astro.redirect("/login?next=%2Fadmin%2Fmedia", 302);
+}
+
+const editorial = Astro.locals.user.role === "editor" || Astro.locals.user.role === "admin";
+if (!editorial) Astro.response.status = 403;
+
+type ModerationRow = {
+  id: string;
+  r2_key: string;
+  mime_type: string;
+  width: number | null;
+  height: number | null;
+  byte_size: number;
+  alt_text: string | null;
+  original_filename: string | null;
+  purpose: string;
+  moderation_status: string;
+  created_at: string;
+  owner_name: string | null;
+  owner_email: string | null;
+};
+
+let assets: ModerationRow[] = [];
+let databaseReady = false;
+let csrfToken = "";
+if (editorial) {
+  const database = (env as unknown as { DB?: D1Database }).DB;
+  databaseReady = Boolean(database);
+  if (database) {
+    const result = await database.prepare(
+      `SELECT m.id, m.r2_key, m.mime_type, m.width, m.height, m.byte_size,
+              m.alt_text, m.original_filename, m.purpose, m.moderation_status,
+              m.created_at, u.display_name AS owner_name, u.email AS owner_email
+       FROM media_assets m
+       LEFT JOIN users u ON u.id = m.owner_id
+       WHERE m.upload_status = 'uploaded'
+         AND m.moderation_status IN ('pending', 'quarantined')
+       ORDER BY CASE m.moderation_status WHEN 'quarantined' THEN 0 ELSE 1 END,
+                m.created_at ASC
+       LIMIT 100`,
+    ).all<ModerationRow>();
+    assets = result.results ?? [];
+  }
+
+  let nonce = Astro.cookies.get(CSRF_COOKIE)?.value;
+  if (!nonce) {
+    nonce = createRandomToken(18);
+    Astro.cookies.set(CSRF_COOKIE, nonce, getCsrfCookieOptions(Astro.request));
+  }
+  csrfToken = await createCsrfToken("media-moderate", nonce);
+}
+const sessionCsrf = Astro.locals.session.csrfToken;
+const formatBytes = (bytes: number) => bytes >= 1024 * 1024
+  ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+---
+
+<BaseLayout
+  title="Media Moderation — Ozzyl Recipes"
+  description="Review private contributor media before public delivery."
+  robots="noindex,nofollow"
+>
+  <section class="section section--soft">
+    <div class="container">
+      <p class="eyebrow">Editorial operations</p>
+      <h1 class="section-title">Media moderation</h1>
+      <p class="section-copy">Uploaded originals remain private until an editor approves them. Rejected and quarantined objects are never anonymously served.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div
+      class="container moderation-shell"
+      data-media-moderation
+      data-csrf={csrfToken}
+      data-session-csrf={sessionCsrf}
+    >
+      {!editorial ? (
+        <div class="auth-alert auth-alert--error" role="alert">
+          <strong>Editorial permission required.</strong>
+          <p>Your account cannot review or change media moderation status.</p>
+        </div>
+      ) : !databaseReady ? (
+        <div class="auth-alert" role="status">
+          <strong>D1 moderation storage is unavailable.</strong>
+          <p>The queue remains closed until the D1 binding and media migration are active.</p>
+        </div>
+      ) : assets.length === 0 ? (
+        <div class="moderation-empty" role="status">
+          <h2>No pending images</h2>
+          <p>The moderation queue is currently clear.</p>
+        </div>
+      ) : (
+        <div class="moderation-grid">
+          {assets.map((asset) => (
+            <article class="moderation-card" data-media-card data-media-id={asset.id}>
+              <a class="moderation-card__image" href={`/media/${asset.r2_key}?preview=1`} target="_blank" rel="noopener">
+                <img src={`/media/${asset.r2_key}?preview=1`} alt={asset.alt_text || "Private moderation preview"} loading="lazy" />
+              </a>
+              <div class="moderation-card__body">
+                <div class="moderation-card__heading">
+                  <h2>{asset.original_filename || "Uploaded image"}</h2>
+                  <span class={`moderation-badge moderation-badge--${asset.moderation_status}`}>{asset.moderation_status}</span>
+                </div>
+                <p>{asset.alt_text || "No alternative text was supplied."}</p>
+                <dl class="moderation-meta">
+                  <div><dt>Contributor</dt><dd>{asset.owner_name || asset.owner_email || "Unknown"}</dd></div>
+                  <div><dt>Purpose</dt><dd>{asset.purpose.replaceAll("_", " ")}</dd></div>
+                  <div><dt>Dimensions</dt><dd>{asset.width && asset.height ? `${asset.width} × ${asset.height}` : "Unknown"}</dd></div>
+                  <div><dt>File</dt><dd>{asset.mime_type} · {formatBytes(asset.byte_size)}</dd></div>
+                  <div><dt>Uploaded</dt><dd>{new Date(asset.created_at).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })}</dd></div>
+                </dl>
+                <label class="editor-field">
+                  <span>Moderation note</span>
+                  <textarea data-moderation-reason maxlength="1000" placeholder="Required context for rejection or quarantine."></textarea>
+                </label>
+                <div class="moderation-actions">
+                  <button class="button" type="button" data-moderation-status="approved">Approve</button>
+                  <button class="recipe-tool-button" type="button" data-moderation-status="rejected">Reject</button>
+                  <button class="recipe-tool-button" type="button" data-moderation-status="quarantined">Quarantine</button>
+                </div>
+                <p class="moderation-result" data-moderation-result aria-live="polite"></p>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  </section>
+
+  <script src="/scripts/media-moderation.js" defer></script>
+</BaseLayout>
