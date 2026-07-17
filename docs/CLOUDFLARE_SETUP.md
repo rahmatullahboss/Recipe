@@ -151,7 +151,7 @@ The workflow will:
 npm ci
 npm run build:d1
 wrangler deploy --config wrangler.d1.jsonc
-d1 migrations apply DB --remote --config wrangler.d1.jsonc
+wrangler d1 migrations apply DB --remote --config wrangler.d1.jsonc
 wrangler deploy --config wrangler.d1.jsonc
 ```
 
