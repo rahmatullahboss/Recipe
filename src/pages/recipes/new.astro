@@ -11,27 +11,24 @@ import { markets, resolveMarket } from "../../lib/market";
 import { getMediaReadiness } from "../../lib/media";
 import { getMediaRuntimeStatus } from "../../lib/media-runtime";
 import { supportedRecipeLanguages } from "../../lib/recipe-draft";
+import { getRecipeSubmissionReadiness } from "../../lib/recipe-submissions";
 
 const market = resolveMarket(Astro.request, Astro.url);
 const categories = await listCategories(100);
 const mediaReadiness = getMediaReadiness();
 const mediaRuntime = getMediaRuntimeStatus();
-const canUploadMedia = Boolean(
-  Astro.locals.authReady
-  && Astro.locals.user
-  && Astro.locals.session
-  && mediaRuntime.uploadsEnabled
-  && mediaReadiness.ready,
-);
-let mediaCsrfToken = "";
-if (canUploadMedia) {
-  let nonce = Astro.cookies.get(CSRF_COOKIE)?.value;
-  if (!nonce) {
-    nonce = createRandomToken(18);
-    Astro.cookies.set(CSRF_COOKIE, nonce, getCsrfCookieOptions(Astro.request));
-  }
-  mediaCsrfToken = await createCsrfToken("media-intent", nonce);
+const submissionReadiness = getRecipeSubmissionReadiness();
+const hasVerifiedSession = Boolean(Astro.locals.authReady && Astro.locals.user && Astro.locals.session);
+const canUploadMedia = Boolean(hasVerifiedSession && mediaRuntime.uploadsEnabled && mediaReadiness.ready);
+const canSubmitRecipe = Boolean(hasVerifiedSession && submissionReadiness.ready);
+
+let csrfNonce = Astro.cookies.get(CSRF_COOKIE)?.value;
+if ((canUploadMedia || canSubmitRecipe) && !csrfNonce) {
+  csrfNonce = createRandomToken(18);
+  Astro.cookies.set(CSRF_COOKIE, csrfNonce, getCsrfCookieOptions(Astro.request));
 }
+const mediaCsrfToken = canUploadMedia ? await createCsrfToken("media-intent", csrfNonce) : "";
+const submissionCsrfToken = canSubmitRecipe ? await createCsrfToken("recipe-submit", csrfNonce) : "";
 const sessionCsrf = Astro.locals.session?.csrfToken ?? "";
 const languageLabels: Record<string, string> = {
   en: "English",
@@ -44,14 +41,14 @@ const languageLabels: Record<string, string> = {
 
 <BaseLayout
   title="Create a Recipe Draft — Ozzyl Recipes"
-  description="Create, validate, and attach a moderated image to an international recipe draft."
+  description="Create, validate, attach moderated media, and submit an international recipe for review."
   robots="noindex,nofollow"
 >
   <section class="section section--soft">
     <div class="container">
       <p class="eyebrow">Contributor workspace</p>
       <h1 class="section-title">Create a regional recipe draft</h1>
-      <p class="section-copy">Recipe text autosaves in this browser. When the guarded media feature is activated, verified contributors can upload one JPEG, PNG, or WebP image to private R2 storage; it remains private until editorial approval.</p>
+      <p class="section-copy">Recipe text autosaves in this browser. Guarded contributors can upload a private hero image and submit a complete draft to the D1 editorial queue; nothing becomes public before separate media and recipe approval.</p>
     </div>
   </section>
 
@@ -230,6 +227,31 @@ const languageLabels: Record<string, string> = {
             <button class="recipe-tool-button" type="button" data-add-step>Add step</button>
           </div>
           <div class="repeating-list" data-step-rows></div>
+        </div>
+
+        <div class="editor-section" data-recipe-submission data-submission-enabled={canSubmitRecipe ? "true" : "false"}>
+          <div class="editor-section__heading">
+            <div>
+              <h2>Editorial submission</h2>
+              <p>The recipe, ingredients, directions, taxonomy, contributor ownership, and attached image are committed together in one D1 transaction.</p>
+            </div>
+            <span class="editor-status" data-submission-status aria-live="polite">Not submitted.</span>
+          </div>
+          {canSubmitRecipe ? (
+            <>
+              <input type="hidden" value={submissionCsrfToken} data-submission-csrf />
+              <input type="hidden" value={sessionCsrf} data-submission-session-csrf />
+              <div class="editor-actions editor-actions--compact">
+                <button class="button" type="button" data-submit-recipe>Submit for editorial review</button>
+                <a class="recipe-tool-button" href="/account/submissions">View your submissions</a>
+              </div>
+              <p class="editor-help">An uploaded hero image is required. A pending image may enter the queue, but publication remains blocked until media approval.</p>
+            </>
+          ) : (
+            <div class="validation-errors media-upload-disabled" role="status">
+              <p>Server submission remains disabled until verified authentication, D1, R2, media uploads, migration 0006, and <code>RECIPE_SUBMISSIONS_ENABLED=true</code> are all ready. Local validation and JSON export remain available.</p>
+            </div>
+          )}
         </div>
 
         <div class="validation-errors" data-validation-errors hidden></div>
