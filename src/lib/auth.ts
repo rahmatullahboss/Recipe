@@ -11,10 +11,14 @@ export const CSRF_COOKIE = "ozzyl_csrf";
 const bindings = env as unknown as {
   DB?: D1Database;
   SESSION?: KVNamespace;
+  AUTH_ENABLED?: string;
+  AUTH_PASSWORD_PEPPER?: string;
+  AUTH_FINGERPRINT_PEPPER?: string;
   TURNSTILE_SITE_KEY?: string;
   TURNSTILE_SECRET_KEY?: string;
-  AUTH_PEPPER?: string;
 };
+
+export type AuthUserStatus = "pending_verification" | "active" | "locked" | "suspended" | "deleted";
 
 export type AuthUser = {
   id: string;
@@ -23,7 +27,7 @@ export type AuthUser = {
   displayName: string;
   role: "member" | "editor" | "admin";
   emailVerified: boolean;
-  status: "active" | "suspended" | "deleted";
+  status: AuthUserStatus;
   authVersion: number;
   createdAt: string;
 };
@@ -43,6 +47,7 @@ export type AuthContext = {
 };
 
 export type AuthReadiness = {
+  enabled: boolean;
   ready: boolean;
   database: boolean;
   sessions: boolean;
@@ -96,12 +101,17 @@ function getSessionStore(): KVNamespace | undefined {
 }
 
 function getPepper(): string | undefined {
-  const value = bindings.AUTH_PEPPER?.trim();
+  const value = bindings.AUTH_PASSWORD_PEPPER?.trim();
   return value || undefined;
+}
+
+function isAuthEnabled(): boolean {
+  return bindings.AUTH_ENABLED?.trim().toLowerCase() === "true";
 }
 
 export function getAuthReadiness(): AuthReadiness {
   const state = {
+    enabled: isAuthEnabled(),
     database: Boolean(getDatabase()),
     sessions: Boolean(getSessionStore()),
     turnstileSiteKey: Boolean(bindings.TURNSTILE_SITE_KEY?.trim()),
@@ -110,6 +120,7 @@ export function getAuthReadiness(): AuthReadiness {
   };
   const missing: string[] = [];
 
+  if (!state.enabled) missing.push("account feature flag");
   if (!state.database) missing.push("D1 account database");
   if (!state.sessions) missing.push("KV session binding");
   if (!state.turnstileSiteKey) missing.push("Turnstile site key");
@@ -252,9 +263,21 @@ export function validateRegistrationInput(input: {
   return { email, displayName, password, errors };
 }
 
+function normaliseStatus(value: string | null): AuthUserStatus {
+  if (
+    value === "pending_verification"
+    || value === "active"
+    || value === "locked"
+    || value === "suspended"
+    || value === "deleted"
+  ) {
+    return value;
+  }
+  return "suspended";
+}
+
 function rowToUser(row: UserRow): AuthUser {
   const role = row.role === "admin" || row.role === "editor" ? row.role : "member";
-  const status = row.status === "suspended" || row.status === "deleted" ? row.status : "active";
   return {
     id: row.id,
     email: row.email,
@@ -262,7 +285,7 @@ function rowToUser(row: UserRow): AuthUser {
     displayName: row.display_name,
     role,
     emailVerified: Boolean(row.email_verified_at),
-    status,
+    status: normaliseStatus(row.status),
     authVersion: row.auth_version ?? 1,
     createdAt: row.created_at,
   };
@@ -279,7 +302,7 @@ const userSelect = `
 async function findUserByEmail(email: string): Promise<UserRow | null> {
   const database = getDatabase();
   if (!database) throw new AuthServiceError("unavailable", "Account storage is not configured.");
-  return database.prepare(`${userSelect} WHERE LOWER(email) = ? LIMIT 1`).bind(email).first<UserRow>();
+  return database.prepare(`${userSelect} WHERE email = ? COLLATE NOCASE LIMIT 1`).bind(email).first<UserRow>();
 }
 
 export async function findUserById(userId: string): Promise<AuthUser | null> {
@@ -312,8 +335,9 @@ export async function registerUser(input: {
     await database.prepare(
       `INSERT INTO users (
         id, email, username, display_name, password_hash, role,
-        email_verified_at, status, auth_version, password_changed_at
-      ) VALUES (?, ?, ?, ?, ?, 'member', NULL, 'active', 1, CURRENT_TIMESTAMP)`,
+        email_verified_at, status, auth_version, password_changed_at,
+        password_algorithm
+      ) VALUES (?, ?, ?, ?, ?, 'member', NULL, 'pending_verification', 1, CURRENT_TIMESTAMP, 'pbkdf2-sha256-hmacpepper-v1')`,
     ).bind(id, validated.email, username, validated.displayName, passwordHash).run();
   } catch (error) {
     const message = error instanceof Error ? error.message.toLowerCase() : "";
@@ -342,9 +366,11 @@ export async function authenticateUser(emailInput: unknown, passwordInput: unkno
   const validPassword = password.length <= 128 && await verifyPassword(password, encodedHash);
   const now = Date.now();
   const locked = row?.locked_until ? new Date(row.locked_until).getTime() > now : false;
+  const status = normaliseStatus(row?.status ?? null);
+  const loginStatusAllowed = status === "active" || status === "pending_verification";
 
-  if (!row || !validPassword || locked || (row.status && row.status !== "active")) {
-    if (row && !locked) {
+  if (!row || !validPassword || locked || !loginStatusAllowed) {
+    if (row && !locked && loginStatusAllowed) {
       const failures = (row.failed_login_count ?? 0) + 1;
       const lockedUntil = failures >= 10 ? new Date(now + 15 * 60 * 1000).toISOString() : null;
       await database.prepare(
@@ -397,6 +423,9 @@ export function getCsrfCookieOptions(request: Request) {
 export async function createSession(user: AuthUser): Promise<{ token: string; session: AuthSession }> {
   const store = getSessionStore();
   if (!store) throw new AuthServiceError("unavailable", "Session storage is not configured.");
+  if (user.status !== "active" && user.status !== "pending_verification") {
+    throw new AuthServiceError("forbidden", "This account cannot create a session.");
+  }
 
   const token = createRandomToken(32);
   const key = await sha256(token);
@@ -420,8 +449,9 @@ export async function destroySession(session: AuthSession | null): Promise<void>
 }
 
 export async function getAuthContext(request: Request): Promise<AuthContext> {
+  const readiness = getAuthReadiness();
   const store = getSessionStore();
-  if (!store) return { user: null, session: null };
+  if (!readiness.enabled || !store || !getDatabase()) return { user: null, session: null };
 
   const token = readCookie(request, SESSION_COOKIE_PRODUCTION) ?? readCookie(request, SESSION_COOKIE_DEVELOPMENT);
   if (!token || token.length > 256) return { user: null, session: null };
@@ -434,7 +464,8 @@ export async function getAuthContext(request: Request): Promise<AuthContext> {
   }
 
   const user = await findUserById(stored.userId);
-  if (!user || user.status !== "active" || user.authVersion !== stored.authVersion) {
+  const sessionStatusAllowed = user?.status === "active" || user?.status === "pending_verification";
+  if (!user || !sessionStatusAllowed || user.authVersion !== stored.authVersion) {
     await store.delete(`auth:session:${key}`);
     return { user: null, session: null };
   }
