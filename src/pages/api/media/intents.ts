@@ -6,6 +6,7 @@ import {
   validateCsrfToken,
 } from "../../../lib/auth";
 import { createMediaUploadIntent, getMediaReadiness } from "../../../lib/media";
+import { getMediaRuntimeStatus } from "../../../lib/media-runtime";
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, {
@@ -17,6 +18,9 @@ function json(body: unknown, status = 200): Response {
 export const POST: APIRoute = async ({ request, cookies, locals }) => {
   if (!locals.authReady || !locals.user || !locals.session) {
     return json({ ok: false, error: "Sign in with a verified account before uploading media." }, 401);
+  }
+  if (!getMediaRuntimeStatus().uploadsEnabled) {
+    return json({ ok: false, error: "Contributor media uploads are not enabled." }, 503);
   }
   if (!getMediaReadiness().ready) {
     return json({ ok: false, error: "Media storage is not configured." }, 503);
