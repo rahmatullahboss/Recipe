@@ -33,7 +33,8 @@
     "SITE_NAME": "Ozzyl Recipes",
     "DATA_MODE": "d1",
     "AUTH_ENABLED": "false",
-    "AUTH_REGISTRATION_ENABLED": "false"
+    "AUTH_REGISTRATION_ENABLED": "false",
+    "MEDIA_UPLOADS_ENABLED": "false"
   },
   "observability": {
     "enabled": true,
