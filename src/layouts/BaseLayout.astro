@@ -9,12 +9,14 @@ type Props = {
   title?: string;
   description?: string;
   image?: string;
+  robots?: string;
 };
 
 const {
   title = "Ozzyl Recipes — Trusted Recipes from Around the World",
   description = "Discover dependable recipes, practical cooking guides, and regional favourites selected for your market.",
   image = "",
+  robots = "index,follow",
 } = Astro.props;
 
 const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url.origin);
@@ -28,6 +30,7 @@ const returnTo = `${Astro.url.pathname}${Astro.url.search}`;
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width" />
     <meta name="description" content={description} />
+    <meta name="robots" content={robots} />
     <meta name="theme-color" content="#fffdf8" />
     <meta name="geo.region" content={market.code} />
     <link rel="canonical" href={canonical} />
