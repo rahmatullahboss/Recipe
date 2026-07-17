@@ -4,6 +4,7 @@ import "../styles/market.css";
 import "../styles/discovery.css";
 import "../styles/recipe-tools.css";
 import "../styles/editor.css";
+import "../styles/kitchen.css";
 import { markets, resolveMarket } from "../lib/market";
 
 type Props = {
@@ -27,7 +28,8 @@ const pathname = Astro.url.pathname;
 const navItems = [
   { href: "/search", label: "Recipes" },
   { href: "/categories", label: "Categories" },
-  { href: "/markets", label: "Markets" },
+  { href: "/meal-plan", label: "Meal plan", count: "plan" },
+  { href: "/shopping-list", label: "Shopping", count: "shopping" },
   { href: "/saved", label: "Saved" },
 ];
 const isCurrent = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
@@ -63,7 +65,11 @@ const isCurrent = (href: string) => pathname === href || pathname.startsWith(`${
 
         <nav class="main-nav" aria-label="Main navigation">
           {navItems.map((item) => (
-            <a href={item.href} aria-current={isCurrent(item.href) ? "page" : undefined}>{item.label}</a>
+            <a href={item.href} aria-current={isCurrent(item.href) ? "page" : undefined}>
+              {item.label}
+              {item.count === "shopping" && <span class="nav-count" data-shopping-count>0</span>}
+              {item.count === "plan" && <span class="nav-count" data-plan-count>0</span>}
+            </a>
           ))}
         </nav>
 
@@ -87,9 +93,14 @@ const isCurrent = (href: string) => pathname === href || pathname.startsWith(`${
           <div class="mobile-menu__panel">
             <nav aria-label="Mobile navigation">
               {navItems.map((item) => (
-                <a href={item.href} aria-current={isCurrent(item.href) ? "page" : undefined}>{item.label}</a>
+                <a href={item.href} aria-current={isCurrent(item.href) ? "page" : undefined}>
+                  {item.label}
+                  {item.count === "shopping" && <span class="nav-count" data-shopping-count>0</span>}
+                  {item.count === "plan" && <span class="nav-count" data-plan-count>0</span>}
+                </a>
               ))}
             </nav>
+            <a href="/markets">Markets</a>
             <div class="mobile-menu__actions">
               <a class="button button--ghost" href="/login">Sign in</a>
               <a class="button" href="/recipes/new">Add recipe</a>
@@ -116,11 +127,12 @@ const isCurrent = (href: string) => pathname === href || pathname.startsWith(`${
         </div>
         <div>
           <strong>Explore</strong>
-          <p class="footer-copy"><a href="/search">All recipes</a> · <a href="/categories">Categories</a> · <a href="/markets">Markets</a> · <a href="/saved">Saved</a> · <a href="/about">About</a> · <a href="/privacy">Privacy</a></p>
+          <p class="footer-copy"><a href="/search">All recipes</a> · <a href="/categories">Categories</a> · <a href="/markets">Markets</a> · <a href="/meal-plan">Meal plan</a> · <a href="/shopping-list">Shopping</a> · <a href="/saved">Saved</a> · <a href="/about">About</a> · <a href="/privacy">Privacy</a></p>
         </div>
       </div>
     </footer>
 
+    <script src="/scripts/kitchen-state.js" defer></script>
     <script src="/scripts/saved-recipes.js" defer></script>
   </body>
 </html>
