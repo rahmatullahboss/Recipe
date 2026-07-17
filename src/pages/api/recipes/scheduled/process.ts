@@ -1,12 +1,12 @@
 import type { APIRoute } from "astro";
-import { CSRF_COOKIE, isSameOriginRequest, validateCsrfToken } from "../../../../../lib/auth";
+import { CSRF_COOKIE, isSameOriginRequest, validateCsrfToken } from "../../../../lib/auth";
 import {
   processDueScheduledPublications,
-} from "../../../../../lib/recipe-publication";
+} from "../../../../lib/recipe-publication";
 import {
   RecipeSubmissionError,
   getRecipeSubmissionReadiness,
-} from "../../../../../lib/recipe-submissions";
+} from "../../../../lib/recipe-submissions";
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
