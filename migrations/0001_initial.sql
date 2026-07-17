@@ -35,6 +35,7 @@ CREATE TABLE recipes (
   image_url TEXT,
   country_code TEXT NOT NULL DEFAULT 'GLOBAL',
   language_code TEXT NOT NULL DEFAULT 'en',
+  measurement_system TEXT NOT NULL DEFAULT 'metric' CHECK (measurement_system IN ('us', 'metric')),
   prep_minutes INTEGER NOT NULL DEFAULT 0 CHECK (prep_minutes >= 0),
   cook_minutes INTEGER NOT NULL DEFAULT 0 CHECK (cook_minutes >= 0),
   servings INTEGER NOT NULL DEFAULT 1 CHECK (servings > 0),
@@ -48,6 +49,20 @@ CREATE TABLE recipes (
   published_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE recipe_localizations (
+  id TEXT PRIMARY KEY,
+  recipe_id TEXT NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+  language_code TEXT NOT NULL,
+  slug TEXT NOT NULL,
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  description TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (recipe_id, language_code),
+  UNIQUE (language_code, slug)
 );
 
 CREATE TABLE recipe_categories (
@@ -73,6 +88,21 @@ CREATE TABLE recipe_steps (
   image_key TEXT,
   timer_seconds INTEGER,
   sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE recipe_nutrition (
+  recipe_id TEXT PRIMARY KEY REFERENCES recipes(id) ON DELETE CASCADE,
+  serving_label TEXT,
+  calories_kcal REAL,
+  protein_g REAL,
+  carbohydrate_g REAL,
+  fat_g REAL,
+  saturated_fat_g REAL,
+  fibre_g REAL,
+  sugar_g REAL,
+  sodium_mg REAL,
+  source TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE ratings (
@@ -119,7 +149,9 @@ CREATE TABLE media_assets (
 CREATE INDEX idx_recipes_status_published ON recipes(status, published_at DESC);
 CREATE INDEX idx_recipes_featured ON recipes(is_featured, published_at DESC);
 CREATE INDEX idx_recipes_country ON recipes(country_code, status, is_featured DESC, published_at DESC);
+CREATE INDEX idx_recipes_language ON recipes(language_code, status, published_at DESC);
 CREATE INDEX idx_recipes_author ON recipes(author_id, created_at DESC);
+CREATE INDEX idx_recipe_localizations_recipe ON recipe_localizations(recipe_id, language_code);
 CREATE INDEX idx_recipe_categories_category ON recipe_categories(category_id, recipe_id);
 CREATE INDEX idx_recipe_ingredients_recipe ON recipe_ingredients(recipe_id, sort_order);
 CREATE INDEX idx_recipe_steps_recipe ON recipe_steps(recipe_id, sort_order);
