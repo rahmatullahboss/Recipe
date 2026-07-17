@@ -32,5 +32,8 @@ jobs:
       - name: Validate catalogue and D1 migrations
         run: npm run validate
 
+      - name: Validate operational scripts
+        run: node --check scripts/prepare-admin-bootstrap.mjs
+
       - name: Generate Cloudflare types and build Astro Worker
         run: npm run build
