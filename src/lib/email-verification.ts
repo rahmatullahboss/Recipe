@@ -6,14 +6,12 @@ const VERIFICATION_TTL_SECONDS = 60 * 30;
 
 const bindings = env as unknown as {
   DB?: D1Database;
-  SESSION?: KVNamespace;
 };
 
 type VerificationRecord = {
-  userId: string;
-  email: string;
-  createdAt: string;
-  expiresAt: string;
+  id: string;
+  user_id: string;
+  target_email: string | null;
 };
 
 async function sha256(value: string): Promise<string> {
@@ -25,47 +23,68 @@ async function sha256(value: string): Promise<string> {
 }
 
 export async function createEmailVerificationToken(user: { id: string; email: string }): Promise<string> {
-  const store = bindings.SESSION;
-  if (!store) throw new AuthServiceError("unavailable", "Verification token storage is not configured.");
+  const database = bindings.DB;
+  if (!database) throw new AuthServiceError("unavailable", "Verification token storage is not configured.");
 
   const token = createRandomToken(32);
   const digest = await sha256(token);
-  const now = new Date();
-  const record: VerificationRecord = {
-    userId: user.id,
-    email: normaliseEmail(user.email),
-    createdAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + VERIFICATION_TTL_SECONDS * 1000).toISOString(),
-  };
+  const expiresAt = new Date(Date.now() + VERIFICATION_TTL_SECONDS * 1000).toISOString();
+  const email = normaliseEmail(user.email);
 
-  await store.put(`auth:verify-email:${digest}`, JSON.stringify(record), {
-    expirationTtl: VERIFICATION_TTL_SECONDS,
-  });
+  await database.batch([
+    database.prepare(
+      `UPDATE auth_tokens
+       SET consumed_at = COALESCE(consumed_at, CURRENT_TIMESTAMP)
+       WHERE user_id = ? AND purpose = 'email_verification' AND consumed_at IS NULL`,
+    ).bind(user.id),
+    database.prepare(
+      `INSERT INTO auth_tokens (
+        id, user_id, purpose, token_hash, target_email, expires_at
+      ) VALUES (?, ?, 'email_verification', ?, ?, ?)`,
+    ).bind(crypto.randomUUID(), user.id, digest, email, expiresAt),
+  ]);
+
   return token;
 }
 
 export async function consumeEmailVerificationToken(tokenInput: unknown): Promise<boolean> {
   const database = bindings.DB;
-  const store = bindings.SESSION;
-  if (!database || !store || typeof tokenInput !== "string" || tokenInput.length < 32 || tokenInput.length > 256) {
+  if (!database || typeof tokenInput !== "string" || tokenInput.length < 32 || tokenInput.length > 256) {
     return false;
   }
 
   const digest = await sha256(tokenInput);
-  const key = `auth:verify-email:${digest}`;
-  const record = await store.get<VerificationRecord>(key, "json");
-  if (!record || new Date(record.expiresAt).getTime() <= Date.now()) {
-    if (record) await store.delete(key);
-    return false;
-  }
+  const record = await database.prepare(
+    `SELECT id, user_id, target_email
+     FROM auth_tokens
+     WHERE token_hash = ?
+       AND purpose = 'email_verification'
+       AND consumed_at IS NULL
+       AND expires_at > CURRENT_TIMESTAMP
+     LIMIT 1`,
+  ).bind(digest).first<VerificationRecord>();
+  if (!record) return false;
 
-  const result = await database.prepare(
-    `UPDATE users
-     SET email_verified_at = COALESCE(email_verified_at, CURRENT_TIMESTAMP)
-     WHERE id = ? AND LOWER(email) = ? AND status = 'active'`,
-  ).bind(record.userId, normaliseEmail(record.email)).run();
+  const results = await database.batch([
+    database.prepare(
+      `UPDATE auth_tokens
+       SET consumed_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP`,
+    ).bind(record.id),
+    database.prepare(
+      `UPDATE users
+       SET email_verified_at = COALESCE(email_verified_at, CURRENT_TIMESTAMP),
+           status = CASE WHEN status = 'pending_verification' THEN 'active' ELSE status END
+       WHERE id = ?
+         AND status IN ('pending_verification', 'active')
+         AND (? IS NULL OR email = ? COLLATE NOCASE)`,
+    ).bind(record.user_id, record.target_email, record.target_email),
+  ]);
 
-  if (!result.success || (result.meta.changes ?? 0) < 1) return false;
-  await store.delete(key);
-  return true;
+  return Boolean(
+    results[0]?.success
+    && (results[0].meta.changes ?? 0) === 1
+    && results[1]?.success
+    && (results[1].meta.changes ?? 0) === 1,
+  );
 }
