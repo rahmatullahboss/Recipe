@@ -5,6 +5,7 @@ import "../styles/discovery.css";
 import "../styles/recipe-tools.css";
 import "../styles/editor.css";
 import "../styles/kitchen.css";
+import "../styles/auth.css";
 import { markets, resolveMarket } from "../lib/market";
 
 type Props = {
@@ -25,6 +26,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url.origin);
 const market = resolveMarket(Astro.request, Astro.url);
 const returnTo = `${Astro.url.pathname}${Astro.url.search}`;
 const pathname = Astro.url.pathname;
+const user = Astro.locals.user;
 const navItems = [
   { href: "/search", label: "Recipes" },
   { href: "/categories", label: "Categories" },
@@ -86,7 +88,13 @@ const isCurrent = (href: string) => pathname === href || pathname.startsWith(`${
             </select>
             <button class="market-apply" type="submit">Apply</button>
           </form>
-          <a class="button button--ghost" href="/login">Sign in</a>
+          {user ? (
+            <a class="button button--ghost" href="/account" aria-current={isCurrent("/account") ? "page" : undefined}>
+              {user.displayName}
+            </a>
+          ) : (
+            <a class="button button--ghost" href={`/login?next=${encodeURIComponent(returnTo)}`}>Sign in</a>
+          )}
           <a class="button" href="/recipes/new">Add recipe</a>
         </div>
 
@@ -104,7 +112,11 @@ const isCurrent = (href: string) => pathname === href || pathname.startsWith(`${
             </nav>
             <a href="/markets">Markets</a>
             <div class="mobile-menu__actions">
-              <a class="button button--ghost" href="/login">Sign in</a>
+              {user ? (
+                <a class="button button--ghost" href="/account">Account</a>
+              ) : (
+                <a class="button button--ghost" href={`/login?next=${encodeURIComponent(returnTo)}`}>Sign in</a>
+              )}
               <a class="button" href="/recipes/new">Add recipe</a>
             </div>
           </div>
