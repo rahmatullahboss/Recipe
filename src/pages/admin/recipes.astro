@@ -32,6 +32,10 @@ const sessionCsrf = Astro.locals.session.csrfToken;
       <p class="eyebrow">Editorial operations</p>
       <h1 class="section-title">Recipe review queue</h1>
       <p class="section-copy">Publication remains separate from media approval. Scheduled promotion rechecks recipe revision, complete content, approved media, and current privacy-safe derivatives.</p>
+      <div class="editor-actions editor-actions--compact">
+        <a class="recipe-tool-button" href="/admin/recipe-change-sets">Published recipe update queue</a>
+        <a class="recipe-tool-button" href="/admin/media">Media moderation</a>
+      </div>
     </div>
   </section>
   <section class="section">
@@ -79,9 +83,9 @@ const sessionCsrf = Astro.locals.session.csrfToken;
           </section>
 
           <section class="editor-section">
-            <h2>Recipes awaiting review</h2>
+            <h2>Recipes awaiting initial publication review</h2>
             {queue.length === 0 ? (
-              <div class="moderation-empty"><h3>No recipes awaiting review</h3><p>The editorial queue is clear.</p></div>
+              <div class="moderation-empty"><h3>No recipes awaiting review</h3><p>The initial submission queue is clear.</p></div>
             ) : (
               <div class="submission-list">
                 {queue.map((item: any) => (
