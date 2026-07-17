@@ -1,11 +1,35 @@
 ---
 import BaseLayout from "../../layouts/BaseLayout.astro";
+import {
+  CSRF_COOKIE,
+  createCsrfToken,
+  createRandomToken,
+  getCsrfCookieOptions,
+} from "../../lib/auth";
 import { listCategories } from "../../lib/db";
 import { markets, resolveMarket } from "../../lib/market";
+import { getMediaReadiness } from "../../lib/media";
 import { supportedRecipeLanguages } from "../../lib/recipe-draft";
 
 const market = resolveMarket(Astro.request, Astro.url);
 const categories = await listCategories(100);
+const mediaReadiness = getMediaReadiness();
+const canUploadMedia = Boolean(
+  Astro.locals.authReady
+  && Astro.locals.user
+  && Astro.locals.session
+  && mediaReadiness.ready,
+);
+let mediaCsrfToken = "";
+if (canUploadMedia) {
+  let nonce = Astro.cookies.get(CSRF_COOKIE)?.value;
+  if (!nonce) {
+    nonce = createRandomToken(18);
+    Astro.cookies.set(CSRF_COOKIE, nonce, getCsrfCookieOptions(Astro.request));
+  }
+  mediaCsrfToken = await createCsrfToken("media-intent", nonce);
+}
+const sessionCsrf = Astro.locals.session?.csrfToken ?? "";
 const languageLabels: Record<string, string> = {
   en: "English",
   fr: "French",
@@ -17,20 +41,22 @@ const languageLabels: Record<string, string> = {
 
 <BaseLayout
   title="Create a Recipe Draft — Ozzyl Recipes"
-  description="Create and validate an international recipe draft in your browser."
+  description="Create, validate, and attach a moderated image to an international recipe draft."
   robots="noindex,nofollow"
 >
   <section class="section section--soft">
     <div class="container">
       <p class="eyebrow">Contributor workspace</p>
       <h1 class="section-title">Create a regional recipe draft</h1>
-      <p class="section-copy">Your work autosaves only in this browser. The Cloudflare Worker validates the same structured payload that will later be stored in D1 and connected to R2 media uploads.</p>
+      <p class="section-copy">Recipe text autosaves in this browser. Verified contributors can upload one JPEG, PNG, or WebP image to private R2 storage; it remains private until editorial approval.</p>
     </div>
   </section>
 
   <section class="section" data-recipe-editor>
     <div class="container editor-shell">
       <form class="editor-form" novalidate>
+        <input name="mediaAssetId" type="hidden" value="" data-media-asset-id />
+
         <div class="editor-section">
           <div class="editor-section__heading">
             <div>
@@ -58,6 +84,45 @@ const languageLabels: Record<string, string> = {
               <textarea name="description" maxlength="5000" placeholder="Add useful context, technique notes, serving ideas, and regional background."></textarea>
             </label>
           </div>
+        </div>
+
+        <div class="editor-section" data-media-uploader data-media-enabled={canUploadMedia ? "true" : "false"}>
+          <div class="editor-section__heading">
+            <div>
+              <h2>Recipe image</h2>
+              <p>Images are validated by file signature, dimensions, byte size, and checksum before private R2 storage.</p>
+            </div>
+            <span class="editor-status" data-media-status aria-live="polite">No image attached.</span>
+          </div>
+
+          {canUploadMedia ? (
+            <div class="media-upload-grid">
+              <input type="hidden" value={mediaCsrfToken} data-media-csrf />
+              <input type="hidden" value={sessionCsrf} data-media-session-csrf />
+              <label class="editor-field editor-field--full">
+                <span>JPEG, PNG, or WebP</span>
+                <input data-media-file type="file" accept="image/jpeg,image/png,image/webp" />
+                <small class="editor-help">Maximum 8 MB. Minimum 320 × 240 pixels. SVG files are not accepted.</small>
+              </label>
+              <label class="editor-field editor-field--full">
+                <span>Alternative text</span>
+                <input data-media-alt type="text" maxlength="240" placeholder="Describe the visible food, plating, and important context." />
+                <small class="editor-help">Required for recipe images and reviewed with the image.</small>
+              </label>
+              <div class="editor-actions editor-actions--compact">
+                <button class="button" type="button" data-upload-media>Upload for review</button>
+                <button class="recipe-tool-button" type="button" data-clear-media>Detach image</button>
+              </div>
+            </div>
+          ) : (
+            <div class="validation-errors media-upload-disabled" role="status">
+              {Astro.locals.user ? (
+                <p>Media uploads remain safely disabled until D1, R2, authentication, and the media migration are active.</p>
+              ) : (
+                <p><a href="/login?next=%2Frecipes%2Fnew">Sign in with a verified account</a> to upload a private image for editorial review. The text draft still works without an account.</p>
+              )}
+            </div>
+          )}
         </div>
 
         <div class="editor-section">
@@ -174,12 +239,15 @@ const languageLabels: Record<string, string> = {
       </form>
 
       <aside class="editor-preview" aria-label="Recipe draft preview">
-        <div class="editor-preview__image">Recipe photo preview</div>
+        <div class="editor-preview__image" data-preview-image-wrap>
+          <img data-preview-image hidden alt="" />
+          <span data-preview-image-placeholder>Recipe photo preview</span>
+        </div>
         <p class="eyebrow">Live draft preview</p>
         <h2 data-preview-title>Untitled regional recipe</h2>
         <p data-preview-summary>Your recipe summary will appear here.</p>
         <p class="editor-preview__meta" data-preview-meta>{market.code} · 45 min · 4 servings · easy</p>
-        <p class="conversion-note">Images are deliberately not stored locally. Signed R2 uploads and moderation will be connected after authentication.</p>
+        <p class="conversion-note" data-preview-media-status>No image attached. Uploaded images remain private while moderation is pending.</p>
       </aside>
 
       <template data-ingredient-template>
