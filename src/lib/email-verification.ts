@@ -1,12 +1,12 @@
-import { env } from "cloudflare:workers";
-import { AuthServiceError, createRandomToken, normaliseEmail } from "./auth";
+import {
+  AuthServiceError,
+  createRandomToken,
+  getAuthBindings,
+  normaliseEmail,
+  sha256Base64Url,
+} from "./auth";
 
-const encoder = new TextEncoder();
 const VERIFICATION_TTL_SECONDS = 60 * 30;
-
-const bindings = env as unknown as {
-  DB?: D1Database;
-};
 
 type VerificationRecord = {
   id: string;
@@ -14,22 +14,26 @@ type VerificationRecord = {
   target_email: string | null;
 };
 
-async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(value));
-  const bytes = new Uint8Array(digest);
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+async function requestFingerprint(request?: Request): Promise<string | null> {
+  if (!request) return null;
+  const pepper = getAuthBindings().AUTH_FINGERPRINT_PEPPER?.trim();
+  const ip = request.headers.get("cf-connecting-ip");
+  return pepper && ip ? sha256Base64Url(`${pepper}:${ip}`) : null;
 }
 
-export async function createEmailVerificationToken(user: { id: string; email: string }): Promise<string> {
-  const database = bindings.DB;
+export async function createEmailVerificationToken(
+  user: { id: string; email: string },
+  request?: Request,
+): Promise<{ token: string; tokenId: string; expiresAt: string }> {
+  const database = getAuthBindings().DB;
   if (!database) throw new AuthServiceError("unavailable", "Verification token storage is not configured.");
 
   const token = createRandomToken(32);
-  const digest = await sha256(token);
+  const digest = await sha256Base64Url(token);
+  const tokenId = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + VERIFICATION_TTL_SECONDS * 1000).toISOString();
   const email = normaliseEmail(user.email);
+  const ipHash = await requestFingerprint(request);
 
   await database.batch([
     database.prepare(
@@ -39,21 +43,71 @@ export async function createEmailVerificationToken(user: { id: string; email: st
     ).bind(user.id),
     database.prepare(
       `INSERT INTO auth_tokens (
-        id, user_id, purpose, token_hash, target_email, expires_at
-      ) VALUES (?, ?, 'email_verification', ?, ?, ?)`,
-    ).bind(crypto.randomUUID(), user.id, digest, email, expiresAt),
+        id, user_id, purpose, token_hash, target_email, requested_ip_hash, expires_at
+      ) VALUES (?, ?, 'email_verification', ?, ?, ?, ?)`,
+    ).bind(tokenId, user.id, digest, email, ipHash, expiresAt),
   ]);
 
-  return token;
+  return { token, tokenId, expiresAt };
+}
+
+async function invalidateToken(tokenId: string): Promise<void> {
+  const database = getAuthBindings().DB;
+  if (database) {
+    await database.prepare(
+      "UPDATE auth_tokens SET consumed_at = COALESCE(consumed_at, CURRENT_TIMESTAMP) WHERE id = ?",
+    ).bind(tokenId).run();
+  }
+}
+
+export async function deliverEmailVerification(
+  user: { id: string; email: string; displayName: string },
+  request: Request,
+): Promise<void> {
+  const bindings = getAuthBindings();
+  const webhookUrl = bindings.AUTH_EMAIL_WEBHOOK_URL?.trim();
+  const webhookToken = bindings.AUTH_EMAIL_WEBHOOK_TOKEN?.trim();
+  if (!webhookUrl || !webhookToken) {
+    throw new AuthServiceError("unavailable", "Verification email delivery is not configured.");
+  }
+
+  const issued = await createEmailVerificationToken(user, request);
+  const verificationUrl = new URL("/verify-email", request.url);
+  verificationUrl.searchParams.set("token", issued.token);
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${webhookToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        event: "verify_email",
+        to: normaliseEmail(user.email),
+        from: bindings.AUTH_FROM_EMAIL?.trim() || undefined,
+        recipientName: user.displayName,
+        verificationUrl: verificationUrl.toString(),
+        expiresAt: issued.expiresAt,
+      }),
+    });
+
+    if (!response.ok) {
+      await invalidateToken(issued.tokenId);
+      throw new AuthServiceError("unavailable", "Verification email delivery failed.");
+    }
+  } catch (error) {
+    await invalidateToken(issued.tokenId);
+    if (error instanceof AuthServiceError) throw error;
+    throw new AuthServiceError("unavailable", "Verification email delivery is unavailable.");
+  }
 }
 
 export async function consumeEmailVerificationToken(tokenInput: unknown): Promise<boolean> {
-  const database = bindings.DB;
-  if (!database || typeof tokenInput !== "string" || tokenInput.length < 32 || tokenInput.length > 256) {
-    return false;
-  }
+  const database = getAuthBindings().DB;
+  if (!database || typeof tokenInput !== "string" || tokenInput.length < 32 || tokenInput.length > 256) return false;
 
-  const digest = await sha256(tokenInput);
+  const digest = await sha256Base64Url(tokenInput);
   const record = await database.prepare(
     `SELECT id, user_id, target_email
      FROM auth_tokens
@@ -74,7 +128,8 @@ export async function consumeEmailVerificationToken(tokenInput: unknown): Promis
     database.prepare(
       `UPDATE users
        SET email_verified_at = COALESCE(email_verified_at, CURRENT_TIMESTAMP),
-           status = CASE WHEN status = 'pending_verification' THEN 'active' ELSE status END
+           status = CASE WHEN status = 'pending_verification' THEN 'active' ELSE status END,
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = ?
          AND status IN ('pending_verification', 'active')
          AND (? IS NULL OR email = ? COLLATE NOCASE)`,
