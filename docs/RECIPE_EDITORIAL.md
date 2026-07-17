@@ -34,3 +34,52 @@ moderation_status = approved
 ```
 
 Editors inspect media at `/admin/media` and recipes at `/admin/recipes`.
+
+## Editorial publication
+
+Only `editor` and `admin` accounts can use the editorial transition endpoint. It requires same-origin metadata, the `recipe-editorial` CSRF purpose, the current session CSRF value, a valid action, and the expected revision.
+
+Publishing requires status `review`, a matching optimistic revision, at least two ingredients, at least two directions, at least one category, and an approved uploaded hero image.
+
+The final conditional D1 update checks approved media again inside the write condition. A changed recipe revision or changed media status causes a conflict instead of publishing stale content.
+
+Archiving a review submission requires a clear editorial reason.
+
+## Audit history
+
+Migration `0006_recipe_editorial` adds `recipe_editorial_events` plus D1 triggers for the initial review submission and every real status transition. Events record the actor, previous status, next status, reason, revision, and timestamp.
+
+## Private routes
+
+- `/account/submissions` — contributor-owned submission status
+- `/admin/recipes` — editor/admin review queue
+- `/admin/recipes/:id` — detailed private review
+- `/api/recipes/submissions` — protected contributor submission
+- `/api/recipes/:id/editorial` — protected editorial transition
+
+Middleware applies `private, no-store` to these routes. Robots rules disallow account, admin, and API paths.
+
+## Health and rollback
+
+`/api/health` exposes non-secret recipe-submission readiness. When intentionally activated, both `recipeSubmissions.enabled` and `recipeSubmissions.ready` must be true. The guarded workflow verifies the requested flag against the deployed health response.
+
+Running **Enable D1 and Deploy** closes authentication and every trusted write surface while preserving D1 rows and audit history. To close only recipe submissions, rerun **Enable Authentication** with `enable_recipe_submissions=false`.
+
+## Test matrix
+
+1. Anonymous submission returns 401.
+2. Invalid origin or CSRF returns 403.
+3. Invalid drafts and unknown categories create no partial rows.
+4. Another contributor's media cannot be attached.
+5. Rejected, quarantined, deleted, or reused media cannot be attached.
+6. A valid submission enters the private review queue and remains absent from public search.
+7. Publication is blocked while media is pending.
+8. Approved media and complete content allow publication.
+9. A stale revision or concurrent media change returns 409.
+10. Archive without a clear reason returns 422.
+11. A successful status transition creates one editorial event.
+12. A published recipe becomes available through the existing D1 public queries.
+
+## Current boundary
+
+This phase supports first submission, publication, and archival from review. Contributor editing after submission, editor-requested changes, resubmission, scheduled publishing, published-recipe revisions, and archive restoration remain future phases.
