@@ -39,6 +39,7 @@ async function validateMigrations() {
     "0007_recipe_revisions",
     "0008_media_derivatives",
     "0009_recipe_publication_workflow",
+    "0010_published_recipe_change_sets",
   ];
   const actual = (await readdir(directory, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory())
@@ -93,6 +94,21 @@ async function validateMigrations() {
   ]) {
     assert(sql.get("0009_recipe_publication_workflow")?.includes(token), `Recipe publication workflow migration is missing ${token}.`);
   }
+  for (const token of [
+    "recipe_change_sets",
+    "recipe_change_set_events",
+    "base_recipe_revision",
+    "base_content_revision",
+    "base_content_json",
+    "content_json",
+    "idx_recipe_change_sets_one_active_per_recipe",
+    "idx_recipe_change_sets_active_media",
+    "recipe_change_sets_require_published_owner_insert",
+    "recipe_change_sets_media_not_assigned_elsewhere_insert",
+    "recipes_media_not_reserved_by_change_set_insert",
+  ]) {
+    assert(sql.get("0010_published_recipe_change_sets")?.includes(token), `Published recipe change-set migration is missing ${token}.`);
+  }
 
   const wrangler = await readFile(path.join(root, "wrangler.d1.jsonc"), "utf8");
   assert(wrangler.includes('"migrations_pattern": "migrations/d1/*/migration.sql"'), "Wrangler migration pattern changed.");
@@ -113,8 +129,12 @@ async function validateMigrations() {
     "private originals could be publicly delivered",
     "ready derivative delivery gate is unavailable",
     "required JPEG/WebP fallback matrix is unavailable",
+    "published recipe private change sets are not available",
+    "published change-set base revision guard is not available",
+    "published change-set media reservation is not available",
+    "published change-set atomic promotion is not available",
   ]) {
-    assert(activation.includes(token), `Guarded activation derivative capability check is missing: ${token}.`);
+    assert(activation.includes(token), `Guarded activation capability check is missing: ${token}.`);
   }
 }
 
@@ -217,6 +237,27 @@ async function validateSecurityFoundations() {
     assert(publication.includes(token), `Recipe publication workflow invariant is missing: ${token}.`);
   }
 
+  const changeSets = await readFile(path.join(root, "src", "lib", "recipe-change-sets.ts"), "utf8");
+  for (const token of [
+    "startPublishedRecipeChangeSet",
+    "savePublishedRecipeChangeSet",
+    "requestPublishedRecipeChangeSetChanges",
+    "approvePublishedRecipeChangeSet",
+    "base_recipe_revision",
+    "base_content_revision",
+    "base_content_json",
+    "content_json",
+    "revision_write_token",
+    "status = 'published'",
+    "content_revision = content_revision + 1",
+    "resolveOwnedChangeSetMedia",
+    "MEDIA_DERIVATIVE_POLICY_VERSION",
+    "database.batch(statements)",
+    "atomicRelationalPromotion: true",
+  ]) {
+    assert(changeSets.includes(token), `Published recipe change-set invariant is missing: ${token}.`);
+  }
+
   const submitRoute = await readFile(path.join(root, "src", "pages", "api", "recipes", "submissions.ts"), "utf8");
   assert(submitRoute.includes('validateCsrfToken("recipe-submit"'), "Recipe submission CSRF check is missing.");
   assert(submitRoute.includes("consumeRateLimit"), "Recipe submission rate limit is missing.");
@@ -241,6 +282,21 @@ async function validateSecurityFoundations() {
   assert(scheduleRoute.includes("processDueScheduledPublications"), "Scheduled processor implementation is missing.");
   assert(scheduleRoute.includes('"Cache-Control": "private, no-store"'), "Scheduled processor responses must remain private and no-store.");
 
+  const contributorChangeSetRoute = await readFile(path.join(root, "src", "pages", "api", "recipes", "[id]", "change-set.ts"), "utf8");
+  assert(contributorChangeSetRoute.includes('validateCsrfToken("recipe-published-change-set"'), "Published change-set contributor CSRF check is missing.");
+  assert(contributorChangeSetRoute.includes("consumeRateLimit"), "Published change-set contributor rate limit is missing.");
+  assert(contributorChangeSetRoute.includes("validateRecipeDraft"), "Published change-set canonical validation is missing.");
+  for (const token of ["create", "save", "submit", "cancel", "expectedRevision"]) {
+    assert(contributorChangeSetRoute.includes(token), `Published change-set contributor route is missing: ${token}.`);
+  }
+
+  const changeSetEditorialRoute = await readFile(path.join(root, "src", "pages", "api", "recipe-change-sets", "[id]", "editorial.ts"), "utf8");
+  assert(changeSetEditorialRoute.includes('validateCsrfToken("recipe-change-set-editorial"'), "Published change-set editorial CSRF check is missing.");
+  assert(changeSetEditorialRoute.includes('locals.user.role !== "editor"'), "Published change-set editorial role check is missing.");
+  for (const token of ["request_changes", "approve", "cancel", "expectedRevision"]) {
+    assert(changeSetEditorialRoute.includes(token), `Published change-set editorial route is missing: ${token}.`);
+  }
+
   const moderation = await readFile(path.join(root, "src", "lib", "media-moderation.ts"), "utf8");
   for (const token of ["media_derivative_jobs", "required_variant_count", "ready_variant_count", "MEDIA_DERIVATIVE_POLICY_VERSION"]) {
     assert(moderation.includes(token), `Media approval derivative gate is missing: ${token}.`);
@@ -256,7 +312,8 @@ async function validateSecurityFoundations() {
 
   const deleteRoute = await readFile(path.join(root, "src", "pages", "api", "media", "[id].ts"), "utf8");
   assert(deleteRoute.includes('validateCsrfToken("media-delete"'), "Media deletion CSRF check is missing.");
-  assert(deleteRoute.includes("SELECT id FROM recipes WHERE media_asset_id"), "Media deletion must refuse assigned originals.");
+  assert(deleteRoute.includes("FROM recipes"), "Media deletion must refuse live recipe assignments.");
+  assert(deleteRoute.includes("FROM recipe_change_sets"), "Media deletion must refuse active change-set reservations.");
   assert(deleteRoute.includes("deleteOriginal: true"), "Media deletion must clean the private original after D1 denial.");
 
   const health = await readFile(path.join(root, "src", "pages", "api", "health.ts"), "utf8");
@@ -272,6 +329,12 @@ async function validateSecurityFoundations() {
     "archiveRestore",
     "scheduledAtomicPromotion",
     "automaticScheduleCronConfigured",
+    "publishedChangeSets",
+    "oneActivePublishedChangeSet",
+    "publishedChangeSetBaseGuard",
+    "publishedChangeSetMediaReservation",
+    "publishedChangeSetAtomicPromotion",
+    "publishedChangeSetAuditEvents",
   ]) {
     assert(health.includes(token), `Health capability is missing: ${token}.`);
   }
@@ -299,4 +362,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, nine D1 migrations, guarded authentication, privacy-safe media derivatives, scheduled publication, archive restoration, recipe editorial and contributor revision invariants, and browser scripts.`);
+console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, ten D1 migrations, guarded authentication, privacy-safe media derivatives, scheduled publication, archive restoration, private published recipe change sets, recipe editorial and contributor revision invariants, and browser scripts.`);
