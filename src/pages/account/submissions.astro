@@ -1,5 +1,6 @@
 ---
 import BaseLayout from "../../layouts/BaseLayout.astro";
+import { listContributorActivePublishedChangeSets } from "../../lib/recipe-change-set-queries";
 import { getRecipeSubmissionReadiness } from "../../lib/recipe-submissions";
 import { listContributorSubmissionsWithRevisions } from "../../lib/recipe-revisions";
 
@@ -8,8 +9,15 @@ if (!Astro.locals.user || !Astro.locals.session) {
 }
 
 const readiness = getRecipeSubmissionReadiness();
-const submissions = readiness.database ? await listContributorSubmissionsWithRevisions(Astro.locals.user.id, 100) : [];
+const [submissions, activeChangeSets] = readiness.database
+  ? await Promise.all([
+    listContributorSubmissionsWithRevisions(Astro.locals.user.id, 100),
+    listContributorActivePublishedChangeSets(Astro.locals.user.id, 100),
+  ])
+  : [[], []];
+const changeSetByRecipe = new Map((activeChangeSets as any[]).map((changeSet) => [changeSet.recipe_id, changeSet]));
 const statusLabel = (status: string) => status === "draft" ? "Changes requested" : status === "review" ? "Under review" : status === "published" ? "Published" : "Archived";
+const changeSetLabel = (status: string) => status === "changes_requested" ? "Update changes requested" : status === "review" ? "Published update under review" : "Private published update draft";
 ---
 
 <BaseLayout title="Your Recipe Submissions — Ozzyl Recipes" robots="noindex,nofollow">
@@ -17,7 +25,7 @@ const statusLabel = (status: string) => status === "draft" ? "Changes requested"
     <div class="container">
       <p class="eyebrow">Contributor workspace</p>
       <h1 class="section-title">Your recipe submissions</h1>
-      <p class="section-copy">Track editorial status, content history, requested changes, and private resubmissions.</p>
+      <p class="section-copy">Track initial submissions, requested corrections, immutable history, and private updates to already published recipes.</p>
     </div>
   </section>
   <section class="section">
@@ -26,33 +34,48 @@ const statusLabel = (status: string) => status === "draft" ? "Changes requested"
       {readiness.database && submissions.length === 0 && <div class="moderation-empty"><h2>No recipe submissions yet</h2><p>Create an original recipe draft and submit it when the guarded pipeline is enabled.</p></div>}
       {submissions.length > 0 && (
         <div class="submission-cards">
-          {submissions.map((item: any) => (
-            <article class="submission-card">
-              <div class="submission-card__heading">
-                <div>
-                  <p class="eyebrow">{statusLabel(item.status)}</p>
-                  <h2>{item.title}</h2>
+          {submissions.map((item: any) => {
+            const changeSet: any = changeSetByRecipe.get(item.id);
+            return (
+              <article class="submission-card">
+                <div class="submission-card__heading">
+                  <div>
+                    <p class="eyebrow">{statusLabel(item.status)}</p>
+                    <h2>{item.title}</h2>
+                  </div>
+                  <span class={`moderation-badge moderation-badge--${item.status === "draft" ? "quarantined" : item.status === "published" ? "approved" : "pending"}`}>{item.status}</span>
                 </div>
-                <span class={`moderation-badge moderation-badge--${item.status === "draft" ? "quarantined" : item.status === "published" ? "approved" : "pending"}`}>{item.status}</span>
-              </div>
-              <dl class="moderation-meta">
-                <div><dt>Content revision</dt><dd>{item.content_revision}</dd></div>
-                <div><dt>Lock revision</dt><dd>{item.revision}</dd></div>
-                <div><dt>Media</dt><dd>{item.media_moderation_status || "missing"}</dd></div>
-                <div><dt>Updated</dt><dd>{new Date(item.updated_at).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })}</dd></div>
-              </dl>
-              {item.status === "draft" && (
-                <div class="auth-alert auth-alert--error">
-                  <strong>Editorial changes requested</strong>
-                  <p>{item.editorial_reason || "Review the editor feedback and revise the complete recipe."}</p>
+                <dl class="moderation-meta">
+                  <div><dt>Content revision</dt><dd>{item.content_revision}</dd></div>
+                  <div><dt>Lock revision</dt><dd>{item.revision}</dd></div>
+                  <div><dt>Media</dt><dd>{item.media_moderation_status || "missing"}</dd></div>
+                  <div><dt>Updated</dt><dd>{new Date(item.updated_at).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })}</dd></div>
+                </dl>
+                {item.status === "draft" && (
+                  <div class="auth-alert auth-alert--error">
+                    <strong>Editorial changes requested</strong>
+                    <p>{item.editorial_reason || "Review the editor feedback and revise the complete recipe."}</p>
+                  </div>
+                )}
+                {changeSet && (
+                  <div class={changeSet.status === "changes_requested" ? "auth-alert auth-alert--error" : "auth-alert"}>
+                    <strong>{changeSetLabel(changeSet.status)}</strong>
+                    <p>Change-set revision {changeSet.revision} · based on live revision {changeSet.base_recipe_revision}/{changeSet.base_content_revision}. The public recipe remains unchanged.</p>
+                    {changeSet.editorial_reason && <p>{changeSet.editorial_reason}</p>}
+                  </div>
+                )}
+                <div class="editor-actions editor-actions--compact">
+                  {item.status === "draft" && <a class="button" href={`/account/submissions/${item.id}/edit`}>Revise and resubmit</a>}
+                  {item.status === "published" && <a class="button button--ghost" href={`/recipes/${item.slug}`}>View published recipe</a>}
+                  {item.status === "published" && (
+                    <a class={changeSet ? "button" : "recipe-tool-button"} href={`/account/submissions/${item.id}/change-set`}>
+                      {changeSet ? "Open private update" : "Propose published update"}
+                    </a>
+                  )}
                 </div>
-              )}
-              <div class="editor-actions editor-actions--compact">
-                {item.status === "draft" && <a class="button" href={`/account/submissions/${item.id}/edit`}>Revise and resubmit</a>}
-                {item.status === "published" && <a class="button button--ghost" href={`/recipes/${item.slug}`}>View published recipe</a>}
-              </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </div>
       )}
       <p><a class="button" href="/recipes/new">Create another recipe</a></p>
