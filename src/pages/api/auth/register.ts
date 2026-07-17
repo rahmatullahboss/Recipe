@@ -5,12 +5,12 @@ import {
   consumeRateLimit,
   deletePendingRegistration,
   isSameOriginRequest,
-  recordAuthAudit,
   registerUser,
   safeNextPath,
   validateCsrfToken,
   verifyTurnstile,
 } from "../../../lib/auth";
+import { recordAuthAudit } from "../../../lib/auth/audit";
 import { deliverEmailVerification } from "../../../lib/email-verification";
 
 function registerRedirect(request: Request, error: string, next: string): Response {
@@ -24,17 +24,21 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   const form = await request.formData();
   const next = safeNextPath(form.get("next"));
 
-  if (!isSameOriginRequest(request)) return registerRedirect(request, "request", next);
+  if (!isSameOriginRequest(request)) {
+    await recordAuthAudit(request, { eventType: "register", outcome: "blocked", metadata: { reason: "origin" } });
+    return registerRedirect(request, "request", next);
+  }
 
   const csrfNonce = cookies.get(CSRF_COOKIE)?.value;
   if (!await validateCsrfToken("register", csrfNonce, form.get("csrfToken"))) {
+    await recordAuthAudit(request, { eventType: "register", outcome: "blocked", metadata: { reason: "csrf" } });
     return registerRedirect(request, "request", next);
   }
 
   const email = form.get("email");
   const allowed = await consumeRateLimit(request, "register", String(email ?? ""), 5, 60 * 60);
   if (!allowed) {
-    await recordAuthAudit("register", "blocked", request, null, { reason: "rate_limit" });
+    await recordAuthAudit(request, { eventType: "register", outcome: "blocked", metadata: { reason: "rate_limit" } });
     return registerRedirect(request, "rate", next);
   }
 
@@ -42,7 +46,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   try {
     const turnstileValid = await verifyTurnstile(request, form.get("cf-turnstile-response"), "register");
     if (!turnstileValid) {
-      await recordAuthAudit("register", "blocked", request, null, { reason: "turnstile" });
+      await recordAuthAudit(request, { eventType: "register", outcome: "blocked", metadata: { reason: "turnstile" } });
       return registerRedirect(request, "challenge", next);
     }
 
@@ -56,7 +60,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     pendingUserId = user.id;
 
     await deliverEmailVerification(user, request);
-    await recordAuthAudit("register", "success", request, user.id);
+    await recordAuthAudit(request, { userId: user.id, eventType: "register", outcome: "success" });
 
     const verificationPage = new URL("/verify-email", request.url);
     verificationPage.searchParams.set("sent", "1");
@@ -64,16 +68,26 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     return Response.redirect(verificationPage, 303);
   } catch (error) {
     if (pendingUserId) {
-      await recordAuthAudit("register", "failure", request, pendingUserId, { reason: "verification_delivery" });
+      await recordAuthAudit(request, { userId: pendingUserId, eventType: "register", outcome: "failure", metadata: { reason: "verification_delivery" } });
       await deletePendingRegistration(pendingUserId);
     }
 
     if (error instanceof AuthServiceError) {
-      if (error.code === "duplicate") return registerRedirect(request, "duplicate", next);
-      if (error.code === "invalid") return registerRedirect(request, "invalid", next);
-      if (error.code === "unavailable") return registerRedirect(request, "unavailable", next);
+      if (error.code === "duplicate") {
+        await recordAuthAudit(request, { eventType: "register", outcome: "failure", metadata: { reason: "duplicate" } });
+        return registerRedirect(request, "duplicate", next);
+      }
+      if (error.code === "invalid") {
+        await recordAuthAudit(request, { eventType: "register", outcome: "failure", metadata: { reason: "validation" } });
+        return registerRedirect(request, "invalid", next);
+      }
+      if (error.code === "unavailable") {
+        await recordAuthAudit(request, { eventType: "register", outcome: "blocked", metadata: { reason: "configuration_or_delivery" } });
+        return registerRedirect(request, "unavailable", next);
+      }
     }
     console.error("Registration failed unexpectedly.", error);
+    await recordAuthAudit(request, { eventType: "register", outcome: "failure", metadata: { reason: "internal" } });
     return registerRedirect(request, "unavailable", next);
   }
 };
