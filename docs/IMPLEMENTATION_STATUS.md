@@ -28,6 +28,31 @@
 - Original-measurement mode
 - Print and copy-link actions
 - Browser-local recipe saves and private saved collection page
+- One-click recipe ingredient transfer to the shopping list
+- One-click placement on the next open meal-plan day
+- Guided cooking route with large sequential steps
+- Previous/next and keyboard navigation
+- Countdown timers, finish feedback, and supported screen wake lock
+
+### Private kitchen planning
+
+- Browser-local shopping list with check, remove, clear, and copy controls
+- Browser-local seven-day meal planner
+- Previous/current/next week navigation
+- Per-day recipe selection, weekly copy, and clearing
+- Cross-tab state updates
+- Navigation counts for outstanding shopping items and planned meals
+- Privacy disclosure and `noindex`/`no-store` controls
+
+### Offline and install foundation
+
+- Web application manifest
+- Branded SVG application icon
+- Secure-context service-worker registration
+- Network-first navigation caching
+- Cache-first same-origin static resources
+- Offline fallback page
+- API and media routes excluded from service-worker interception
 
 ### Contributor foundation
 
@@ -57,6 +82,8 @@
 - R2 media route with missing-binding handling
 - Astro middleware security headers and CSP
 - Private route no-store and noindex controls
+- Catalogue, taxonomy, market, and migration integrity checks
+- Syntax checking for every public browser script and service worker
 - Cloudflare/GitHub setup and rollback documentation
 
 ## Current deployment mode
@@ -84,7 +111,7 @@ The application automatically selects D1 when the binding is available and falls
 1. Authentication, email verification, roles, secure KV sessions, and Turnstile
 2. Signed R2 uploads and media moderation
 3. D1-backed recipe publishing and editorial review
-4. Account-synchronised saves, ratings, reviews, comments, and collections
+4. Account-synchronised saves, shopping lists, meal plans, ratings, reviews, comments, and collections
 5. Nutrition editing and verified conversion metadata
 6. Taxonomy, localisation, and moderation administration
 7. Queued media/email jobs and search indexing
