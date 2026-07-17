@@ -42,7 +42,7 @@ function isPrivatePath(pathname: string): boolean {
     || pathname.startsWith("/api/recipe-change-sets/")
     || pathname.startsWith("/api/recipes/scheduled/")
     || pathname.startsWith("/admin/")
-    || /^\/api\/recipes\/[^/]+\/(editorial|resubmit|change-set)\/?$/.test(pathname)
+    || /^\/api\/recipes\/[^/]+\/(editorial|resubmit|change-set|editor-change-set)\/?$/.test(pathname)
     || /^\/recipes\/[^/]+\/cook\/?$/.test(pathname);
 }
 
