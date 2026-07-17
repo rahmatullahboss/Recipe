@@ -1,5 +1,6 @@
 ---
 import type { RecipeSummary } from "../lib/db";
+import { getMarket } from "../lib/market";
 
 type Props = {
   recipe: RecipeSummary;
@@ -7,6 +8,7 @@ type Props = {
 
 const { recipe } = Astro.props;
 const totalMinutes = recipe.prep_minutes + recipe.cook_minutes;
+const recipeMarket = recipe.country_code === "GLOBAL" ? "International" : getMarket(recipe.country_code).name;
 ---
 
 <article class="recipe-card">
@@ -18,9 +20,10 @@ const totalMinutes = recipe.prep_minutes + recipe.cook_minutes;
       width="800"
       height="600"
     />
-    {recipe.is_featured === 1 && <span class="recipe-card__badge">Editor favorite</span>}
+    {recipe.is_featured === 1 && <span class="recipe-card__badge">Editor favourite</span>}
   </a>
   <div class="recipe-card__body">
+    <span class="recipe-market">{recipeMarket}</span>
     <h3><a href={`/recipes/${recipe.slug}`}>{recipe.title}</a></h3>
     <p>{recipe.summary}</p>
     <div class="recipe-card__meta">
