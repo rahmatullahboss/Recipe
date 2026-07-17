@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 import { CSRF_COOKIE, isSameOriginRequest, validateCsrfToken } from "../../../../lib/auth";
-import { moderateMediaAsset, type MediaModerationStatus } from "../../../../lib/media";
+import type { MediaModerationStatus } from "../../../../lib/media";
+import { applyMediaModeration } from "../../../../lib/media-moderation";
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, {
@@ -47,13 +48,13 @@ export const POST: APIRoute = async ({ request, cookies, locals, params }) => {
   if (!mediaId || mediaId.length > 100) return json({ ok: false, error: "Invalid media asset." }, 400);
 
   try {
-    const updated = await moderateMediaAsset({
+    const updated = await applyMediaModeration({
       mediaId,
       moderatorId: locals.user.id,
       nextStatus: status as MediaModerationStatus,
       reason: reason || undefined,
     });
-    if (!updated) return json({ ok: false, error: "Media asset was not found or changed concurrently." }, 409);
+    if (!updated) return json({ ok: false, error: "Media asset was not found, already had that status, or changed concurrently." }, 409);
     return json({ ok: true, mediaId, moderationStatus: status });
   } catch (error) {
     console.error("Media moderation failed.", error);
