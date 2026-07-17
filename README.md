@@ -17,7 +17,7 @@ The checked-in public deployment remains D1-free. Public discovery, cooking, pla
 "RECIPE_SUBMISSIONS_ENABLED": "false"
 ```
 
-No production D1 activation, account provisioning, contributor upload, recipe creation, change-set operation, historical restoration, moderation decision, scheduling, publication, deployment, merge, or production change was performed by this branch work.
+No production D1 activation, account provisioning, contributor upload, recipe creation, change-set operation, historical restoration, private rebase, moderation decision, scheduling, publication, deployment, merge, or production change was performed by this branch work.
 
 ## Implemented capabilities
 
@@ -105,6 +105,24 @@ Contributor API and UI independently block writes to an editor-controlled `draft
 
 See [`docs/EDITOR_RECIPE_CHANGE_SETS.md`](docs/EDITOR_RECIPE_CHANGE_SETS.md).
 
+### Audited three-way conflict assistance
+
+Migration `0012_recipe_change_set_rebases` adds immutable private-rebase history.
+
+A stale proposal is compared as:
+
+```text
+stored baseline
+current live published recipe
+private proposed recipe
+```
+
+Each scalar/media/collection unit is classified as unchanged, proposal-only, live-only, same-change, or conflict. Proposal-only changes are retained, live-only changes use the current live value, equal changes collapse safely, and every real conflict requires an explicit live/proposed choice.
+
+Categories, ingredients, and directions are atomic units; the system does not perform unsafe item-level list merging. A guarded D1 batch updates only private baseline/proposal state and inserts immutable before/live/after audit snapshots. Rebase never approves or changes public content, and stale approval remains blocked until the rebased proposal returns through independent review.
+
+See [`docs/RECIPE_CHANGE_SET_CONFLICTS.md`](docs/RECIPE_CHANGE_SET_CONFLICTS.md).
+
 ## Cloudflare architecture
 
 | Concern | Implementation |
@@ -134,6 +152,7 @@ migrations/d1/0008_media_derivatives/migration.sql
 migrations/d1/0009_recipe_publication_workflow/migration.sql
 migrations/d1/0010_published_recipe_change_sets/migration.sql
 migrations/d1/0011_editor_change_set_origins/migration.sql
+migrations/d1/0012_recipe_change_set_rebases/migration.sql
 ```
 
 Wrangler applies only the nested sequence selected by:
@@ -177,6 +196,7 @@ Keep all trusted-write flags false unless a deliberate controlled activation pro
 - `/account/submissions`
 - `/account/submissions/:id/edit`
 - `/account/submissions/:id/change-set`
+- `/account/change-sets/:id/conflicts`
 - `/api/auth/*`
 - `/api/media/intents`, `/api/media/upload`, `/api/media/mine`
 - `POST /api/media/:id/derivatives`
@@ -184,6 +204,7 @@ Keep all trusted-write flags false unless a deliberate controlled activation pro
 - `/api/recipes/submissions`
 - `/api/recipes/:id/resubmit`
 - `POST /api/recipes/:id/change-set`
+- `POST /api/recipe-change-sets/:id/rebase`
 
 ### Editorial and media operations
 
@@ -198,16 +219,17 @@ Keep all trusted-write flags false unless a deliberate controlled activation pro
 - `POST /api/recipes/:id/editor-change-set`
 - `/media/:key`
 
-Private account, contributor, admin, media-write, recipe-write, change-set, historical-restore, editorial, and schedule-processing routes receive no-store/noindex protections where appropriate.
+Private account, contributor, admin, media-write, recipe-write, change-set, historical-restore, conflict-rebase, editorial, and schedule-processing routes receive no-store/noindex protections where appropriate.
 
 ## Guarded workflows
 
-- CI validates the catalogue, eleven migrations, security invariants, browser scripts, fresh local migration chain, and both Worker builds.
+- CI validates the catalogue, twelve migrations, security invariants, browser scripts, fresh local migration chain, and both Worker builds.
 - D1-free deployment occurs from `main` only.
 - D1 provisioning requires exact `ENABLE_D1` confirmation while trusted writes remain disabled.
 - Authentication activation requires exact `ENABLE_AUTH` and independently controls registration, media, and recipe writes.
 - Recipe writes require media uploads.
-- Activation checks include scheduling, restoration, published-row isolation, base guards, media reservation, contributor and editor-authored proposals, historical restore, immutable origins, contributor draft-lock, derivative revalidation, audit events, and atomic promotion.
+- Existing activation checks cover scheduling, restoration, published-row isolation, base guards, media reservation, contributor/editor proposals, historical restore, immutable origins, contributor draft-lock, derivative revalidation, audit events, and atomic promotion.
+- Conflict-assistance readiness is exposed through `/api/health` and enforced by CI. The protected activation workflow was not rewritten in this phase because the connector rejected replacing the secret-bearing workflow file.
 - No automatic schedule processor is deployed by the checked-in code.
 
 ## Documentation
@@ -223,16 +245,16 @@ Private account, contributor, admin, media-write, recipe-write, change-set, hist
 - [`docs/RECIPE_PUBLICATION_WORKFLOW.md`](docs/RECIPE_PUBLICATION_WORKFLOW.md)
 - [`docs/PUBLISHED_RECIPE_CHANGE_SETS.md`](docs/PUBLISHED_RECIPE_CHANGE_SETS.md)
 - [`docs/EDITOR_RECIPE_CHANGE_SETS.md`](docs/EDITOR_RECIPE_CHANGE_SETS.md)
+- [`docs/RECIPE_CHANGE_SET_CONFLICTS.md`](docs/RECIPE_CHANGE_SET_CONFLICTS.md)
 
 ## Validation baseline
 
-Implementation head `c651f235dc40387e852ae0de1e865df746731fb7` passed GitHub Actions CI run `#356`, including locked dependency installation, security/change-set validation, all eleven fresh local D1 migrations, operational-script validation, D1-free Worker build, and D1 Worker build. Documentation commits may move the branch head; always recheck PR `#1` before continuing.
+Implementation head `b2a249a903b66164f36f9ccde0894c77b088e457` passed GitHub Actions CI run `#374`, including locked dependency installation, conflict/security validation, all twelve fresh local D1 migrations, operational-script validation, D1-free Worker build, and D1 Worker build. Documentation commits may move the branch head; always recheck PR `#1` before continuing.
 
 ## Remaining phases
 
-1. Execute controlled non-production runtime acceptance for account, media, derivatives, submissions, correction, scheduling, archive/restore, contributor/editor change sets, historical restoration, concurrency, and rollback.
-2. Add richer three-way conflict comparison or merge assistance without weakening optimistic rejection.
-3. Add optional Cloudflare Cron/queue scheduling only after manual processor acceptance and incident procedures.
-4. Approve legal, retention, moderation, incident, and verification-email operations.
-5. Add synchronized kitchen/community features and account lifecycle interfaces.
-6. Add nutrition/taxonomy/localization administration, search indexing, recommendations, analytics, and advertising controls.
+1. Execute controlled non-production runtime acceptance for account, media, derivatives, submissions, correction, scheduling, archive/restore, contributor/editor change sets, historical restoration, private rebases, concurrency, and rollback.
+2. Add optional Cloudflare Cron/queue scheduling only after manual processor acceptance and incident procedures.
+3. Approve legal, retention, moderation, incident, and verification-email operations.
+4. Add synchronized kitchen/community features and account lifecycle interfaces.
+5. Add nutrition/taxonomy/localization administration, search indexing, recommendations, analytics, and advertising controls.
