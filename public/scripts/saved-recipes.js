@@ -27,25 +27,32 @@ function updateButtons(saved) {
 }
 
 function updateSavedPage(saved) {
-  const cards = [...document.querySelectorAll("[data-saved-card]")];
-  if (!cards.length) return;
+  const page = document.querySelector("[data-saved-page]");
+  if (!page) return;
 
+  const cards = [...page.querySelectorAll("[data-saved-card]")];
   const savedSet = new Set(saved);
   let visible = 0;
+
   for (const card of cards) {
     const isSaved = savedSet.has(card.dataset.savedCard);
     card.hidden = !isSaved;
     if (isSaved) visible += 1;
   }
 
-  const count = document.querySelector("[data-saved-count]");
+  const count = page.querySelector("[data-saved-count]");
   if (count) count.textContent = String(visible);
 
-  const empty = document.querySelector("[data-saved-empty]");
+  const empty = page.querySelector("[data-saved-empty]");
   if (empty) empty.hidden = visible > 0;
 
-  const grid = document.querySelector("[data-saved-grid]");
+  const grid = page.querySelector("[data-saved-grid]");
   if (grid) grid.hidden = visible === 0;
+
+  const loading = page.querySelector("[data-saved-loading]");
+  if (loading) loading.hidden = true;
+
+  page.dataset.ready = "true";
 }
 
 let saved = readSavedRecipes();
