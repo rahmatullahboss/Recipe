@@ -37,9 +37,23 @@ export const DELETE: APIRoute = async ({ request, cookies, locals, params }) => 
   const isEditorial = locals.user.role === "editor" || locals.user.role === "admin";
   if (!isEditorial && asset.owner_id !== locals.user.id) return json({ ok: false, error: "Media ownership is required." }, 403);
   const assigned = await database.prepare(
-    "SELECT id FROM recipes WHERE media_asset_id = ? LIMIT 1",
-  ).bind(mediaId).first<{ id: string }>();
-  if (assigned) return json({ ok: false, error: "Detach this image from its recipe before deleting it." }, 409);
+    `SELECT 'recipe' AS reference_type, id AS reference_id
+     FROM recipes
+     WHERE media_asset_id = ?
+     UNION ALL
+     SELECT 'change_set' AS reference_type, id AS reference_id
+     FROM recipe_change_sets
+     WHERE media_asset_id = ? AND status IN ('draft', 'review', 'changes_requested')
+     LIMIT 1`,
+  ).bind(mediaId, mediaId).first<{ reference_type: string; reference_id: string }>();
+  if (assigned) {
+    return json({
+      ok: false,
+      error: assigned.reference_type === "change_set"
+        ? "Detach this image from its active private recipe update before deleting it."
+        : "Detach this image from its recipe before deleting it.",
+    }, 409);
+  }
 
   const updated = await database.prepare(
     `UPDATE media_assets
