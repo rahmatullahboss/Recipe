@@ -1,6 +1,6 @@
 # D1 Authentication Activation
 
-The account system is implemented for the future D1 deployment, but sign-in and registration remain disabled by default. The current D1-free production path is unchanged.
+The account and contributor-media systems are implemented for the future D1 deployment, but sign-in, registration, and media uploads remain disabled by default. The current D1-free production path is unchanged.
 
 ## Architecture
 
@@ -10,11 +10,13 @@ The account system is implemented for the future D1 deployment, but sign-in and 
 | Email verification and reset token digests | Cloudflare D1 |
 | Consent history and authentication audit events | Cloudflare D1 |
 | Login sessions, CSRF and rate-limit state | Workers KV |
+| Contributor image originals | Cloudflare R2 |
+| Media ownership, intents, moderation, and checksums | Cloudflare D1 |
 | Bot challenge | Cloudflare Turnstile |
 | Verification email delivery | Authenticated HTTPS webhook |
 | Password hashing | PBKDF2-HMAC-SHA256, 600,000 iterations, unique salt, server-only pepper |
 
-A pending or unverified account cannot create a session. D1 is the source of truth for account status and `auth_version`; deleting a KV session or incrementing `auth_version` revokes access.
+A pending or unverified account cannot create a session. D1 is the source of truth for account status and `auth_version`; deleting a KV session or incrementing `auth_version` revokes access. Contributor media has a separate activation flag and remains unavailable merely because sign-in is enabled.
 
 ## Authoritative migrations
 
@@ -25,6 +27,7 @@ migrations/d1/0001_initial/migration.sql
 migrations/d1/0002_seed/migration.sql
 migrations/d1/0003_market_coverage/migration.sql
 migrations/d1/0004_auth_accounts/migration.sql
+migrations/d1/0005_media_pipeline/migration.sql
 ```
 
 `wrangler.d1.jsonc` uses:
@@ -37,7 +40,7 @@ Root-level SQL files are retained as legacy development references and are not p
 
 ## Production activation order
 
-Do not enable account flags before the schema, KV, Turnstile, peppers, and optional registration email delivery are verified.
+Do not enable trusted-write flags before the schema, KV, R2, Turnstile, peppers, optional registration email delivery, and moderation procedures are verified.
 
 ### 1. Provision and migrate D1
 
@@ -47,7 +50,7 @@ Run **Enable D1 and Deploy** with the exact confirmation value:
 ENABLE_D1
 ```
 
-After completion, `/api/health` must report D1 mode and available D1/KV bindings. Authentication should still report `enabled: false`.
+After completion, `/api/health` must report D1 mode and available D1/KV/R2 bindings. Authentication and media uploads should still report disabled.
 
 ### 2. Configure the GitHub `production` environment
 
@@ -110,7 +113,7 @@ The adapter must authenticate the request using the configured webhook token, re
 
 Verification tokens are single-use, expire after 30 minutes, and are stored only as SHA-256 digests in D1. A failed delivery invalidates the token and removes the newly created pending registration.
 
-### 5. Enable sign-in with registration closed
+### 5. Enable sign-in with registration and media closed
 
 Open **Actions → Enable Authentication** and enter exactly:
 
@@ -118,22 +121,34 @@ Open **Actions → Enable Authentication** and enter exactly:
 ENABLE_AUTH
 ```
 
-Keep `enable_registration` set to false.
+Keep both `enable_registration` and `enable_media_uploads` set to false.
 
 The workflow:
 
 1. Verifies required values without printing their contents.
 2. Validates the project and builds the D1 Worker.
-3. Deploys the checked-in D1 configuration with auth disabled.
+3. Deploys the checked-in D1 configuration with accounts and uploads disabled.
 4. Applies pending migrations.
 5. Generates runner-only config and secret input files.
-6. Deploys with `AUTH_ENABLED=true` and `AUTH_REGISTRATION_ENABLED=false`.
-7. Verifies authentication readiness through `/api/health`.
+6. Deploys with `AUTH_ENABLED=true`, `AUTH_REGISTRATION_ENABLED=false`, and `MEDIA_UPLOADS_ENABLED=false`.
+7. Verifies account and media readiness through `/api/health`.
 8. Removes temporary files even after failure.
 
-This allows verified active accounts to sign in while public registration remains closed. The seeded editorial record has no usable password; operational accounts still require a controlled provisioning process.
+This allows verified active accounts to sign in while public registration and contributor uploads remain closed. The seeded editorial record has no usable password; operational accounts still require a controlled provisioning process.
 
-### 6. Enable public registration last
+### 6. Enable contributor media separately
+
+Before enabling uploads:
+
+1. Provision verified contributor and editor or administrator accounts.
+2. Confirm migration `0005_media_pipeline` is applied and R2 is bound.
+3. Test valid and invalid JPEG, PNG, and WebP files, size limits, one-time intent reuse, pending owner previews, moderation decisions, and anonymous denial of unapproved media.
+4. Approve moderation response, retention, deletion, and escalation procedures.
+5. Review `docs/MEDIA_PIPELINE.md`, including the original-file metadata and derivative-generation boundary.
+
+Run **Enable Authentication** again with `enable_media_uploads` set to true. Registration may remain false. The workflow verifies that the media flag matches the input, storage is ready, and the complete media readiness result is true.
+
+### 7. Enable public registration last
 
 Before opening registration:
 
@@ -143,7 +158,7 @@ Before opening registration:
 4. Test registration, email delivery, verification, login, lockout, logout, and session revocation outside production.
 5. Confirm the webhook token and URL are present in the GitHub `production` environment.
 
-Run **Enable Authentication** again with `enable_registration` set to true. The workflow refuses to proceed if registration-specific delivery configuration is missing and verifies `registrationReady: true` after deployment.
+Run **Enable Authentication** again with `enable_registration` set to true. Choose the media flag independently. The workflow refuses to proceed if registration-specific delivery configuration is missing and verifies `registrationReady: true` after deployment.
 
 ## Security behavior
 
@@ -157,10 +172,12 @@ Run **Enable Authentication** again with `enable_registration` set to true. The 
 - Registration, login, email verification, and logout outcomes are audited.
 - Password, verification, session, email, and deployment secrets are never committed.
 - Registration records the accepted terms and privacy document version.
+- Media intents are one-time and store only token digests.
+- Anonymous media delivery requires an uploaded and approved D1 asset record.
 
 ## Health checks
 
-After sign-in activation, `/api/health` must report:
+After sign-in activation with registration and media closed, `/api/health` must report:
 
 ```json
 {
@@ -169,23 +186,29 @@ After sign-in activation, `/api/health` must report:
     "enabled": true,
     "ready": true,
     "registrationEnabled": false
+  },
+  "media": {
+    "uploadsEnabled": false,
+    "storageReady": true,
+    "ready": false
   }
 }
 ```
 
-When registration is enabled, `registrationEnabled` and `registrationReady` must both be true.
+When registration is enabled, `registrationEnabled` and `registrationReady` must both be true. When contributor media is enabled, `uploadsEnabled`, `storageReady`, and `ready` must all be true.
 
-Health output exposes only readiness booleans and counts; it never returns secret values.
+Health output exposes only readiness booleans, limits, and counts; it never returns secret values, object keys, or bucket identifiers.
 
 ## Rollback
 
-To disable account access without deleting D1 data or Cloudflare secrets, run **Enable D1 and Deploy** again. The checked-in D1 configuration redeploys:
+To disable account access and new media uploads without deleting D1 or R2 data, run **Enable D1 and Deploy** again. The checked-in D1 configuration redeploys:
 
 ```jsonc
 "AUTH_ENABLED": "false",
-"AUTH_REGISTRATION_ENABLED": "false"
+"AUTH_REGISTRATION_ENABLED": "false",
+"MEDIA_UPLOADS_ENABLED": "false"
 ```
 
-Existing KV session records become unusable because middleware refuses to restore authentication context while the feature is disabled.
+Existing KV session records become unusable because middleware refuses to restore authentication context while the feature is disabled. New upload intents and raw upload requests close immediately. Existing approved media remains available through the approval-gated delivery route; pending and moderated private assets remain inaccessible to anonymous visitors.
 
 To revoke every session for one account, increment that user's `auth_version` through a controlled administrative action. The next request invalidates KV sessions carrying the previous version.
