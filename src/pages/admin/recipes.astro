@@ -1,5 +1,7 @@
 ---
 import BaseLayout from "../../layouts/BaseLayout.astro";
+import { CSRF_COOKIE, createCsrfToken, createRandomToken, getCsrfCookieOptions } from "../../lib/auth";
+import { listPublicationOperations } from "../../lib/recipe-publication";
 import { getRecipeSubmissionReadiness, listEditorialQueue } from "../../lib/recipe-submissions";
 
 if (!Astro.locals.user || !Astro.locals.session) {
@@ -8,7 +10,20 @@ if (!Astro.locals.user || !Astro.locals.session) {
 const editorial = Astro.locals.user.role === "editor" || Astro.locals.user.role === "admin";
 if (!editorial) Astro.response.status = 403;
 const readiness = getRecipeSubmissionReadiness();
-const queue = editorial && readiness.database ? await listEditorialQueue(100) : [];
+const [queue, operations] = editorial && readiness.database
+  ? await Promise.all([listEditorialQueue(100), listPublicationOperations(100)])
+  : [[], []];
+
+let processorCsrf = "";
+if (editorial && readiness.ready) {
+  let nonce = Astro.cookies.get(CSRF_COOKIE)?.value;
+  if (!nonce) {
+    nonce = createRandomToken(18);
+    Astro.cookies.set(CSRF_COOKIE, nonce, getCsrfCookieOptions(Astro.request));
+  }
+  processorCsrf = await createCsrfToken("recipe-schedule-process", nonce);
+}
+const sessionCsrf = Astro.locals.session.csrfToken;
 ---
 
 <BaseLayout title="Recipe Editorial Queue — Ozzyl Recipes" description="Review private contributor recipe submissions." robots="noindex,nofollow">
@@ -16,7 +31,7 @@ const queue = editorial && readiness.database ? await listEditorialQueue(100) : 
     <div class="container">
       <p class="eyebrow">Editorial operations</p>
       <h1 class="section-title">Recipe review queue</h1>
-      <p class="section-copy">Publication remains separate from media approval. Every recipe must have complete content and an approved hero image.</p>
+      <p class="section-copy">Publication remains separate from media approval. Scheduled promotion rechecks recipe revision, complete content, approved media, and current privacy-safe derivatives.</p>
     </div>
   </section>
   <section class="section">
@@ -25,21 +40,65 @@ const queue = editorial && readiness.database ? await listEditorialQueue(100) : 
         <div class="auth-alert auth-alert--error"><strong>Editorial permission required.</strong></div>
       ) : !readiness.database ? (
         <div class="auth-alert"><strong>D1 editorial storage is unavailable.</strong></div>
-      ) : queue.length === 0 ? (
-        <div class="moderation-empty"><h2>No recipes awaiting review</h2><p>The editorial queue is clear.</p></div>
       ) : (
-        <div class="submission-list">
-          {queue.map((item: any) => (
-            <article class="submission-card">
-              <p class="eyebrow">{item.country_code} · {item.language_code}</p>
-              <h2>{item.title}</h2>
-              <p>{item.summary}</p>
-              <p class="submission-card__meta">By {item.author_name} · image {item.media_moderation_status || "missing"} · {item.ingredient_count} ingredients · {item.step_count} steps</p>
-              <a class="button" href={`/admin/recipes/${item.id}`}>Review submission</a>
-            </article>
-          ))}
-        </div>
+        <>
+          <section class="editor-section" data-schedule-processor data-csrf={processorCsrf} data-session-csrf={sessionCsrf}>
+            <div class="editor-section__heading">
+              <div>
+                <h2>Scheduled publication processor</h2>
+                <p>Manually process up to 25 due schedules. Automatic cron execution is intentionally not configured.</p>
+              </div>
+              <button class="button" type="button" data-process-schedules disabled={!readiness.ready}>Process due schedules</button>
+            </div>
+            {!readiness.ready && <p class="auth-help">Processing remains closed until the guarded recipe pipeline is intentionally enabled.</p>}
+            <p class="moderation-result" data-schedule-result aria-live="polite"></p>
+          </section>
+
+          <section class="editor-section">
+            <h2>Scheduled and archived operations</h2>
+            {operations.length === 0 ? (
+              <div class="moderation-empty"><p>No active schedules or archived recipes.</p></div>
+            ) : (
+              <div class="submission-list">
+                {operations.map((item: any) => {
+                  const activeSchedule = item.status === "review" && item.scheduled_publish_at && item.schedule_revision === item.revision;
+                  return (
+                    <article class="submission-card">
+                      <p class="eyebrow">{activeSchedule ? "Scheduled" : item.status}</p>
+                      <h3>{item.title}</h3>
+                      <p class="submission-card__meta">
+                        By {item.author_name} · lock revision {item.revision}
+                        {activeSchedule ? ` · due ${new Date(`${item.scheduled_publish_at}Z`).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })}` : ""}
+                      </p>
+                      <a class="button button--ghost" href={`/admin/recipes/${item.id}`}>{activeSchedule ? "Review schedule" : "Review archived recipe"}</a>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          <section class="editor-section">
+            <h2>Recipes awaiting review</h2>
+            {queue.length === 0 ? (
+              <div class="moderation-empty"><h3>No recipes awaiting review</h3><p>The editorial queue is clear.</p></div>
+            ) : (
+              <div class="submission-list">
+                {queue.map((item: any) => (
+                  <article class="submission-card">
+                    <p class="eyebrow">{item.country_code} · {item.language_code}</p>
+                    <h3>{item.title}</h3>
+                    <p>{item.summary}</p>
+                    <p class="submission-card__meta">By {item.author_name} · image {item.media_moderation_status || "missing"} · {item.ingredient_count} ingredients · {item.step_count} steps</p>
+                    <a class="button" href={`/admin/recipes/${item.id}`}>Review submission</a>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        </>
       )}
     </div>
   </section>
+  <script src="/scripts/recipe-schedule-processor.js" defer></script>
 </BaseLayout>
