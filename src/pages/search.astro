@@ -1,0 +1,35 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import RecipeCard from "../components/RecipeCard.astro";
+import { listRecipes } from "../lib/db";
+
+const query = Astro.url.searchParams.get("q")?.trim() ?? "";
+const recipes = await listRecipes({ search: query || undefined, limit: 30 });
+const title = query ? `Search results for “${query}” — Ozzyl Recipes` : "Browse Recipes — Ozzyl Recipes";
+---
+
+<BaseLayout title={title} description="Search and browse recipes by title, ingredient, cuisine, and cooking style.">
+  <section class="section">
+    <div class="container">
+      <p class="eyebrow">Recipe finder</p>
+      <h1 class="section-title">{query ? `Results for “${query}”` : "Browse all recipes"}</h1>
+      <form class="search-box" action="/search" method="get">
+        <input name="q" type="search" value={query} placeholder="Search recipes..." aria-label="Search recipes" />
+        <button class="button" type="submit">Search</button>
+      </form>
+
+      <div style="margin-top:42px">
+        {recipes.length > 0 ? (
+          <div class="recipe-grid">
+            {recipes.map((recipe) => <RecipeCard recipe={recipe} />)}
+          </div>
+        ) : (
+          <div class="empty-state">
+            <h2>No recipes found</h2>
+            <p>Try a broader ingredient, cuisine, or meal name.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  </section>
+</BaseLayout>
