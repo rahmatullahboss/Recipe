@@ -2,15 +2,20 @@
 import BaseLayout from "../layouts/BaseLayout.astro";
 ---
 
-<BaseLayout title="Sign In — Ozzyl Recipes" description="Sign in to save and publish recipes.">
+<BaseLayout
+  title="Sign In — Ozzyl Recipes"
+  description="Sign in to save and publish recipes."
+  robots="noindex,nofollow"
+>
   <section class="section">
     <div class="container" style="max-width:680px">
       <div class="recipe-panel">
         <p class="eyebrow">Member accounts</p>
         <h1 class="section-title">Sign in</h1>
-        <p class="section-copy">The account interface is reserved in this foundation. Secure sessions, email verification, password hashing, and Turnstile validation are the next implementation phase.</p>
-        <div style="margin-top:28px">
-          <a class="button" href="/">Continue browsing</a>
+        <p class="section-copy">Browser-saved recipes already work without an account. Secure sessions, email verification, Turnstile validation, and cross-device collection sync will be connected in the authentication phase.</p>
+        <div class="filter-actions">
+          <a class="button" href="/saved">View saved recipes</a>
+          <a class="button button--ghost" href="/">Continue browsing</a>
         </div>
       </div>
     </div>
