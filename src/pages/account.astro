@@ -20,6 +20,7 @@ if (!nonce) {
 }
 const logoutToken = await createCsrfToken("logout", nonce);
 const locale = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" });
+const editorial = user.role === "editor" || user.role === "admin";
 ---
 
 <BaseLayout
@@ -32,13 +33,6 @@ const locale = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "
       <p class="eyebrow">Member account</p>
       <h1 class="section-title">Welcome, {user.displayName}</h1>
       <p class="section-copy">This server-rendered page is available only after the HTTP-only session cookie is verified against Cloudflare KV and the account is confirmed active in D1.</p>
-
-      {!user.emailVerified && (
-        <div class="auth-alert" role="status">
-          <strong>Email verification is pending.</strong>
-          <p>The database and verification-token foundation are ready, but outbound email delivery is not connected yet. Recipe publishing and other trusted write actions remain disabled.</p>
-        </div>
-      )}
 
       <div class="account-grid">
         <section class="account-panel" aria-labelledby="profile-heading">
@@ -80,9 +74,10 @@ const locale = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "
 
         <section class="account-panel" aria-labelledby="publishing-heading">
           <h2 id="publishing-heading">Contributor access</h2>
-          <p class="auth-help">The draft editor works locally. Public submission requires a verified email, Turnstile, signed R2 media authorization, and moderation.</p>
+          <p class="auth-help">The draft editor can request a one-time upload authorization, validate JPEG/PNG/WebP bytes, store the original privately in R2, and attach the pending asset to the local recipe draft. Public delivery still requires editorial approval.</p>
           <div class="filter-actions">
             <a class="button" href="/recipes/new">Open draft editor</a>
+            {editorial && <a class="button button--ghost" href="/admin/media">Review media queue</a>}
           </div>
         </section>
       </div>
