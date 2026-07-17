@@ -37,10 +37,16 @@ const editorControlledDraft = Boolean(
   && changeSetStatus === "draft"
   && await isEditorControlledPublishedChangeSetDraft(editor.changeSet.id),
 );
+const baseStale = Boolean(
+  editor?.changeSet
+  && (editor.recipe.revision !== editor.changeSet.baseRecipeRevision
+    || editor.recipe.contentRevision !== editor.changeSet.baseContentRevision),
+);
 const canCreate = Boolean(editor && !editor.changeSet && hasVerifiedSession && submissionReadiness.ready);
 const canEdit = Boolean(
   editor?.changeSet
   && !editorControlledDraft
+  && !baseStale
   && (changeSetStatus === "draft" || changeSetStatus === "changes_requested")
   && hasVerifiedSession
   && submissionReadiness.ready,
@@ -95,7 +101,7 @@ const languageLabels: Record<string, string> = {
     data-can-create={canCreate ? "true" : "false"}
     data-can-edit={canEdit ? "true" : "false"}
     data-can-cancel={canCancel ? "true" : "false"}
-    data-storage-key={editor?.changeSet && !editorControlledDraft ? `ozzyl:published-change-set:${editor.changeSet.id}:v1` : ""}
+    data-storage-key={editor?.changeSet && !editorControlledDraft && !baseStale ? `ozzyl:published-change-set:${editor.changeSet.id}:v1` : ""}
     data-csrf={changeSetCsrf}
     data-session-csrf={sessionCsrf}
   >
@@ -132,8 +138,10 @@ const languageLabels: Record<string, string> = {
               <div><dt>Base content revision</dt><dd>{editor.changeSet.baseContentRevision}</dd></div>
               <div><dt>Status</dt><dd>editor-controlled draft</dd></div>
             </dl>
+            {baseStale && <div class="auth-alert auth-alert--error"><strong>The live recipe changed after this editorial draft started.</strong><p>The editorial team must resolve the private three-way conflict before continuing.</p></div>}
             <div class="editor-actions">
               <a class="button button--ghost" href={`/recipes/${editor.recipe.slug}`}>View live recipe</a>
+              <a class="recipe-tool-button" href={`/account/change-sets/${editor.changeSet.id}/conflicts`}>View three-way comparison</a>
               <a class="recipe-tool-button" href="/account/submissions">Back to submissions</a>
             </div>
           </article>
@@ -160,9 +168,11 @@ const languageLabels: Record<string, string> = {
               <div><dt>Media</dt><dd>{editor.media?.moderationStatus || "missing"}</dd></div>
               <div><dt>Submitted</dt><dd>{editor.changeSet.submittedAt ? new Date(editor.changeSet.submittedAt).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" }) : "pending"}</dd></div>
             </dl>
+            {baseStale && <div class="auth-alert auth-alert--error"><strong>Approval is blocked by a base conflict.</strong><p>An editor must request conflict resolution before you can rebase and resubmit.</p></div>}
             {editor.changeSet.contributorNote && <p><strong>Contributor note:</strong> {editor.changeSet.contributorNote}</p>}
             <div class="editor-actions">
               <a class="button button--ghost" href={`/recipes/${editor.recipe.slug}`}>View live recipe</a>
+              <a class="recipe-tool-button" href={`/account/change-sets/${editor.changeSet.id}/conflicts`}>View three-way comparison</a>
               <button class="recipe-tool-button" type="button" data-cancel-change-set disabled={!canCancel}>Withdraw proposal</button>
             </div>
             <p class="moderation-result" data-change-set-result aria-live="polite"></p>
@@ -176,6 +186,19 @@ const languageLabels: Record<string, string> = {
             <p>{draft.summary}</p>
             <p class="editor-preview__meta">{draft.countryCode} · {draft.prepMinutes + draft.cookMinutes} min · {draft.servings} servings · {draft.difficulty}</p>
           </aside>
+        </div>
+      ) : baseStale ? (
+        <div class="editor-section">
+          <p class="eyebrow">Private rebase required</p>
+          <h2>The live recipe changed after this proposal started</h2>
+          <p>Normal editing, media replacement, saving, and submission are locked until the private proposal is rebased onto the latest live recipe. No public content will change during this process.</p>
+          {changeSetStatus === "changes_requested" && editor.changeSet.editorialReason && <div class="auth-alert auth-alert--error"><strong>Editorial note</strong><p>{editor.changeSet.editorialReason}</p></div>}
+          <div class="editor-actions">
+            <a class="button" href={`/account/change-sets/${editor.changeSet.id}/conflicts`}>Resolve three-way conflict</a>
+            <button class="recipe-tool-button" type="button" data-cancel-change-set disabled={!canCancel}>Cancel change set</button>
+            <a class="recipe-tool-button" href={`/recipes/${editor.recipe.slug}`}>View current live recipe</a>
+          </div>
+          <p class="moderation-result" data-change-set-result aria-live="polite"></p>
         </div>
       ) : (
         <div class="editor-shell">
