@@ -12,7 +12,8 @@
     {
       "binding": "DB",
       "database_name": "ozzyl-recipes-db",
-      "migrations_dir": "migrations"
+      "migrations_dir": "migrations",
+      "migrations_pattern": "migrations/d1/*/migration.sql"
     }
   ],
   "r2_buckets": [
@@ -30,7 +31,8 @@
   },
   "vars": {
     "SITE_NAME": "Ozzyl Recipes",
-    "DATA_MODE": "d1"
+    "DATA_MODE": "d1",
+    "AUTH_ENABLED": "false"
   },
   "observability": {
     "enabled": true,
