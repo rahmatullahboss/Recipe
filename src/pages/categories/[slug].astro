@@ -8,7 +8,7 @@ const slug = Astro.params.slug?.trim().toLowerCase();
 const category = slug ? await getCategoryBySlug(slug) : null;
 
 if (!category) {
-  return Astro.redirect("/404", 302);
+  return Astro.rewrite("/404");
 }
 
 const market = resolveMarket(Astro.request, Astro.url);
