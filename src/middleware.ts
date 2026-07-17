@@ -1,26 +1,33 @@
 import { defineMiddleware } from "astro:middleware";
+import { getAuthContext, getAuthReadiness } from "./lib/auth";
 
 const contentSecurityPolicy = [
   "default-src 'self'",
   "base-uri 'self'",
-  "connect-src 'self'",
+  "connect-src 'self' https://challenges.cloudflare.com",
   "font-src 'self' data:",
   "form-action 'self'",
   "frame-ancestors 'none'",
+  "frame-src https://challenges.cloudflare.com",
   "img-src 'self' data: https://images.unsplash.com",
   "media-src 'self'",
   "object-src 'none'",
-  "script-src 'self' 'unsafe-inline'",
+  "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com",
   "style-src 'self' 'unsafe-inline'",
   "worker-src 'self'",
 ].join("; ");
 
 const privatePaths = new Set([
   "/login",
+  "/register",
+  "/account",
   "/saved",
   "/meal-plan",
   "/shopping-list",
   "/recipes/new",
+  "/api/auth/login",
+  "/api/auth/register",
+  "/api/auth/logout",
   "/api/recipes/validate",
 ]);
 
@@ -29,6 +36,19 @@ function isPrivatePath(pathname: string): boolean {
 }
 
 export const onRequest = defineMiddleware(async (context, next) => {
+  const readiness = getAuthReadiness();
+  context.locals.authReady = readiness.ready;
+
+  try {
+    const auth = await getAuthContext(context.request);
+    context.locals.user = auth.user;
+    context.locals.session = auth.session;
+  } catch (error) {
+    console.error("Authentication context could not be loaded.", error);
+    context.locals.user = null;
+    context.locals.session = null;
+  }
+
   const response = await next();
   const headers = new Headers(response.headers);
 
