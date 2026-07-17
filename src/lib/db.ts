@@ -55,6 +55,7 @@ const summarySelect = `
     r.title,
     r.slug,
     r.summary,
+    r.description,
     r.image_url,
     r.prep_minutes,
     r.cook_minutes,
