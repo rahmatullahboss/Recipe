@@ -61,6 +61,9 @@ const schemaJson = JSON.stringify(schema).replace(/</g, "\\u003c");
 
   <div
     data-recipe-tools
+    data-recipe-slug={recipe.slug}
+    data-recipe-title={recipe.title}
+    data-recipe-image={recipe.image_url ?? "/images/recipe-placeholder.svg"}
     data-original-servings={recipe.servings}
     data-default-system={defaultMeasurement}
   >
@@ -93,9 +96,13 @@ const schemaJson = JSON.stringify(schema).replace(/</g, "\\u003c");
             <span aria-hidden="true">♡</span>
             <span data-save-label>Save</span>
           </button>
-          <button class="recipe-tool-button" type="button" data-print-recipe>Print recipe</button>
+          <button class="recipe-tool-button" type="button" data-add-shopping>Add ingredients</button>
+          <button class="recipe-tool-button" type="button" data-plan-recipe>Plan meal</button>
+          <a class="recipe-tool-button" href={`/recipes/${recipe.slug}/cook`}>Start cooking</a>
+          <button class="recipe-tool-button" type="button" data-print-recipe>Print</button>
           <button class="recipe-tool-button" type="button" data-copy-recipe>Copy link</button>
         </div>
+        <p class="conversion-note" data-recipe-feedback aria-live="polite"></p>
       </div>
     </section>
 
@@ -144,7 +151,13 @@ const schemaJson = JSON.stringify(schema).replace(/</g, "\\u003c");
           <h2>Ingredients</h2>
           <ul class="ingredient-list">
             {recipe.ingredients.map((ingredient) => (
-              <li data-ingredient data-amount={ingredient.amount ?? ""} data-unit={ingredient.unit ?? ""}>
+              <li
+                data-ingredient
+                data-amount={ingredient.amount ?? ""}
+                data-unit={ingredient.unit ?? ""}
+                data-item={ingredient.item}
+                data-note={ingredient.note ?? ""}
+              >
                 <span class="ingredient-amount">
                   <span data-converted-amount>{ingredient.amount ?? "As needed"}</span>
                   <span data-converted-unit>{ingredient.unit ?? ""}</span>
