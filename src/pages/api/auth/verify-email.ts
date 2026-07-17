@@ -1,48 +1,60 @@
 import type { APIRoute } from "astro";
-import { CSRF_COOKIE, isSameOriginRequest, validateCsrfToken } from "../../../lib/auth";
+import {
+  CSRF_COOKIE,
+  isSameOriginRequest,
+  safeNextPath,
+  validateCsrfToken,
+} from "../../../lib/auth";
 import { recordAuthAudit } from "../../../lib/auth/audit";
 import { consumeEmailVerificationToken } from "../../../lib/email-verification";
 
-export const POST: APIRoute = async ({ request, cookies, locals }) => {
+function verificationRedirect(request: Request, error: string, next: string): Response {
+  const url = new URL("/verify-email", request.url);
+  url.searchParams.set("error", error);
+  if (next !== "/account") url.searchParams.set("next", next);
+  return Response.redirect(url, 303);
+}
+
+export const POST: APIRoute = async ({ request, cookies }) => {
   const form = await request.formData();
   const nonce = cookies.get(CSRF_COOKIE)?.value;
+  const next = safeNextPath(form.get("next"));
 
   if (!isSameOriginRequest(request) || !await validateCsrfToken("verify-email", nonce, form.get("csrfToken"))) {
     await recordAuthAudit(request, {
-      userId: locals.user?.id ?? null,
       eventType: "email_verified",
       outcome: "blocked",
       metadata: { reason: "request_validation" },
     });
-    return Response.redirect(new URL("/verify-email?error=request", request.url), 303);
+    return verificationRedirect(request, "request", next);
   }
 
   try {
     const verified = await consumeEmailVerificationToken(form.get("token"));
     if (!verified) {
       await recordAuthAudit(request, {
-        userId: locals.user?.id ?? null,
         eventType: "email_verified",
         outcome: "failure",
         metadata: { reason: "invalid_or_expired_token" },
       });
-      return Response.redirect(new URL("/verify-email?error=invalid", request.url), 303);
+      return verificationRedirect(request, "invalid", next);
     }
 
     await recordAuthAudit(request, {
-      userId: locals.user?.id ?? null,
       eventType: "email_verified",
       outcome: "success",
     });
-    return Response.redirect(new URL(locals.user ? "/account?verified=1" : "/login?verified=1", request.url), 303);
+    const login = new URL("/login", request.url);
+    login.searchParams.set("verified", "1");
+    if (next !== "/account") login.searchParams.set("next", next);
+    return Response.redirect(login, 303);
   } catch (error) {
     console.error("Email verification failed unexpectedly.", error);
     await recordAuthAudit(request, {
-      userId: locals.user?.id ?? null,
       eventType: "email_verified",
       outcome: "failure",
       metadata: { reason: "internal" },
     });
-    return Response.redirect(new URL("/verify-email?error=unavailable", request.url), 303);
+    return verificationRedirect(request, "unavailable", next);
   }
 };
