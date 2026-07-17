@@ -7,7 +7,7 @@ const slug = Astro.params.slug;
 const recipe = slug ? await getRecipeBySlug(slug) : null;
 
 if (!recipe) {
-  return Astro.redirect("/404", 302);
+  return Astro.rewrite("/404");
 }
 
 const totalMinutes = recipe.prep_minutes + recipe.cook_minutes;
