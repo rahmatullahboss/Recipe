@@ -1,6 +1,7 @@
 ---
 import BaseLayout from "../../../layouts/BaseLayout.astro";
 import { CSRF_COOKIE, createCsrfToken, createRandomToken, getCsrfCookieOptions } from "../../../lib/auth";
+import { getRecipeChangeSetConflictContext } from "../../../lib/recipe-change-set-conflicts";
 import { getEditorialPublishedRecipeChangeSet } from "../../../lib/recipe-change-sets";
 import { getRecipeSubmissionReadiness } from "../../../lib/recipe-submissions";
 
@@ -11,8 +12,13 @@ if (!Astro.locals.user || !Astro.locals.session) {
 const editorial = Astro.locals.user.role === "editor" || Astro.locals.user.role === "admin";
 if (!editorial) Astro.response.status = 403;
 const readiness = getRecipeSubmissionReadiness();
-const detail = editorial && readiness.database ? await getEditorialPublishedRecipeChangeSet(changeSetId) : null;
-if (editorial && readiness.database && !detail) Astro.response.status = 404;
+const [detail, conflict] = editorial && readiness.database
+  ? await Promise.all([
+    getEditorialPublishedRecipeChangeSet(changeSetId),
+    getRecipeChangeSetConflictContext(changeSetId, { id: Astro.locals.user.id, role: Astro.locals.user.role }),
+  ])
+  : [null, null];
+if (editorial && readiness.database && (!detail || !conflict)) Astro.response.status = 404;
 
 let csrfToken = "";
 if (editorial && detail) {
@@ -25,14 +31,10 @@ if (editorial && detail) {
 }
 const sessionCsrf = Astro.locals.session.csrfToken;
 const changeSet: any = detail?.changeSet;
-const proposed = detail?.proposedDraft;
-const baseline = detail?.baselineDraft;
-const stale = Boolean(
-  changeSet
-  && (changeSet.live_status !== "published"
-    || changeSet.live_revision !== changeSet.base_recipe_revision
-    || changeSet.live_content_revision !== changeSet.base_content_revision),
-);
+const proposed = conflict?.proposed;
+const baseline = conflict?.baseline;
+const live = conflict?.live;
+const stale = Boolean(conflict?.baseStale);
 const approveReady = Boolean(
   changeSet?.status === "review"
   && !stale
@@ -48,12 +50,13 @@ const approveReady = Boolean(
       <h1 class="section-title">{changeSet?.live_title || proposed?.title || "Private change-set review"}</h1>
       {changeSet && (
         <p class="section-copy">
-          Submitted by {changeSet.owner_name} · change-set revision {changeSet.revision} · base live revision {changeSet.base_recipe_revision}/{changeSet.base_content_revision}
+          Submitted by {changeSet.owner_name} · change-set revision {changeSet.revision} · stored baseline {changeSet.base_recipe_revision}/{changeSet.base_content_revision} · current live {changeSet.live_revision}/{changeSet.live_content_revision}
         </p>
       )}
       <div class="editor-actions editor-actions--compact">
         <a class="recipe-tool-button" href="/admin/recipe-change-sets">Back to update queue</a>
         {changeSet?.slug && <a class="recipe-tool-button" href={`/recipes/${changeSet.slug}`}>View live recipe</a>}
+        {conflict && <a class="recipe-tool-button" href={`/account/change-sets/${changeSetId}/conflicts`}>Open three-way conflict workspace</a>}
       </div>
     </div>
   </section>
@@ -71,46 +74,53 @@ const approveReady = Boolean(
         <div class="auth-alert auth-alert--error"><strong>Editorial permission required.</strong></div>
       ) : !readiness.database ? (
         <div class="auth-alert"><strong>D1 change-set storage is unavailable.</strong></div>
-      ) : !detail || !changeSet || !proposed || !baseline ? (
+      ) : !detail || !conflict || !changeSet || !proposed || !baseline || !live ? (
         <div class="moderation-empty"><h2>Published recipe change set not found</h2></div>
       ) : (
         <>
           {stale && (
             <div class="auth-alert auth-alert--error">
               <strong>Promotion blocked by a base conflict.</strong>
-              <p>The live recipe changed after this proposal was created. Close this change set and ask the contributor to start from the latest published version.</p>
+              <p>The live recipe changed after this private proposal started. Approval remains disabled. Inspect the three-way report, then request changes to hand private rebasing to the contributor.</p>
             </div>
           )}
 
           <div class="editorial-review__grid">
             <article class="editor-section">
-              <p class="eyebrow">Current live version</p>
+              <p class="eyebrow">Stored baseline</p>
               <h2>{baseline.title}</h2>
               <p><strong>{baseline.summary}</strong></p>
-              {baseline.description && <p>{baseline.description}</p>}
+              <dl class="moderation-meta">
+                <div><dt>Recipe revision</dt><dd>{changeSet.base_recipe_revision}</dd></div>
+                <div><dt>Content revision</dt><dd>{changeSet.base_content_revision}</dd></div>
+                <div><dt>Prep</dt><dd>{baseline.prepMinutes} min</dd></div>
+                <div><dt>Cook</dt><dd>{baseline.cookMinutes} min</dd></div>
+              </dl>
+              <p><strong>Categories:</strong> {baseline.categories.join(", ")}</p>
+            </article>
+
+            <article class="editor-section">
+              <p class="eyebrow">Current live version</p>
+              <h2>{live.title}</h2>
+              <p><strong>{live.summary}</strong></p>
               <dl class="moderation-meta">
                 <div><dt>Recipe revision</dt><dd>{changeSet.live_revision}</dd></div>
                 <div><dt>Content revision</dt><dd>{changeSet.live_content_revision}</dd></div>
-                <div><dt>Prep</dt><dd>{baseline.prepMinutes} min</dd></div>
-                <div><dt>Cook</dt><dd>{baseline.cookMinutes} min</dd></div>
-                <div><dt>Servings</dt><dd>{baseline.servings}</dd></div>
-                <div><dt>Difficulty</dt><dd>{baseline.difficulty}</dd></div>
+                <div><dt>Prep</dt><dd>{live.prepMinutes} min</dd></div>
+                <div><dt>Cook</dt><dd>{live.cookMinutes} min</dd></div>
               </dl>
-              <p><strong>Categories:</strong> {baseline.categories.join(", ")}</p>
+              <p><strong>Categories:</strong> {live.categories.join(", ")}</p>
             </article>
 
             <article class="editor-section">
               <p class="eyebrow">Private proposed version</p>
               <h2>{proposed.title}</h2>
               <p><strong>{proposed.summary}</strong></p>
-              {proposed.description && <p>{proposed.description}</p>}
               <dl class="moderation-meta">
                 <div><dt>Change-set revision</dt><dd>{changeSet.revision}</dd></div>
                 <div><dt>Status</dt><dd>{changeSet.status}</dd></div>
                 <div><dt>Prep</dt><dd>{proposed.prepMinutes} min</dd></div>
                 <div><dt>Cook</dt><dd>{proposed.cookMinutes} min</dd></div>
-                <div><dt>Servings</dt><dd>{proposed.servings}</dd></div>
-                <div><dt>Difficulty</dt><dd>{proposed.difficulty}</dd></div>
               </dl>
               <p><strong>Categories:</strong> {proposed.categories.join(", ")}</p>
               {changeSet.contributor_note && <p><strong>Contributor note:</strong> {changeSet.contributor_note}</p>}
@@ -118,23 +128,30 @@ const approveReady = Boolean(
           </div>
 
           <div class="editorial-review__grid">
+            <article class="editor-section"><p class="eyebrow">Proposal-only</p><h2>{conflict.comparison.summary.proposalOnly}</h2></article>
+            <article class="editor-section"><p class="eyebrow">Live-only</p><h2>{conflict.comparison.summary.liveOnly}</h2></article>
+            <article class="editor-section"><p class="eyebrow">Same change</p><h2>{conflict.comparison.summary.sameChange}</h2></article>
+            <article class="editor-section"><p class="eyebrow">Conflicts</p><h2>{conflict.comparison.summary.conflicts}</h2></article>
+          </div>
+
+          <div class="editorial-review__grid">
             <section class="editor-section">
-              <h2>Current ingredients</h2>
-              <ul>{baseline.ingredients.map((item) => <li>{[item.amount, item.unit, item.item].filter(Boolean).join(" ")}{item.note ? ` — ${item.note}` : ""}</li>)}</ul>
+              <h2>Current live ingredients</h2>
+              <ul>{live.ingredients.map((item) => <li>{[item.amount, item.unit, item.item].filter(Boolean).join(" ")}{item.note ? ` — ${item.note}` : ""}</li>)}</ul>
             </section>
             <section class="editor-section">
-              <h2>Proposed ingredients</h2>
+              <h2>Private proposed ingredients</h2>
               <ul>{proposed.ingredients.map((item) => <li>{[item.amount, item.unit, item.item].filter(Boolean).join(" ")}{item.note ? ` — ${item.note}` : ""}</li>)}</ul>
             </section>
           </div>
 
           <div class="editorial-review__grid">
             <section class="editor-section">
-              <h2>Current directions</h2>
-              <ol>{baseline.steps.map((step) => <li>{step.instruction}{step.timerMinutes !== null ? ` (${step.timerMinutes} min)` : ""}</li>)}</ol>
+              <h2>Current live directions</h2>
+              <ol>{live.steps.map((step) => <li>{step.instruction}{step.timerMinutes !== null ? ` (${step.timerMinutes} min)` : ""}</li>)}</ol>
             </section>
             <section class="editor-section">
-              <h2>Proposed directions</h2>
+              <h2>Private proposed directions</h2>
               <ol>{proposed.steps.map((step) => <li>{step.instruction}{step.timerMinutes !== null ? ` (${step.timerMinutes} min)` : ""}</li>)}</ol>
             </section>
           </div>
@@ -161,10 +178,10 @@ const approveReady = Boolean(
             <section class="editor-section">
               <h2>Editorial decision</h2>
               <p>Approval atomically updates the published scalar fields and normalized category, ingredient, direction, and media relations. A failed guard leaves the live recipe unchanged.</p>
-              <label class="editor-field"><span>Decision note</span><textarea data-change-set-reason maxlength="1000" placeholder="Required for requested changes or closure. Optional approval note."></textarea></label>
+              <label class="editor-field"><span>Decision note</span><textarea data-change-set-reason maxlength="1000" placeholder={stale ? "Explain that the contributor must resolve the three-way conflict before resubmitting." : "Required for requested changes or closure. Optional approval note."}></textarea></label>
               <div class="editor-actions">
                 <button class="button" type="button" data-change-set-action="approve" disabled={!approveReady}>Approve and atomically promote</button>
-                <button class="recipe-tool-button" type="button" data-change-set-action="request_changes">Request contributor changes</button>
+                <button class="recipe-tool-button" type="button" data-change-set-action="request_changes">{stale ? "Request conflict resolution" : "Request contributor changes"}</button>
                 <button class="recipe-tool-button" type="button" data-change-set-action="cancel">Close proposal</button>
               </div>
               {!approveReady && <p class="auth-help">Approval is blocked until the base is current and the proposed hero image is uploaded, approved, and derivative-ready.</p>}
