@@ -119,6 +119,7 @@ async function validateMigrations() {
     "0002_seed",
     "0003_market_coverage",
     "0004_auth_accounts",
+    "0005_media_pipeline",
   ];
 
   assert(JSON.stringify(entries) === JSON.stringify(expected), `Unexpected D1 migration directories: ${entries.join(", ")}`);
@@ -160,6 +161,20 @@ async function validateMigrations() {
     assert(auth.includes(field), `Authentication migration is missing ${field}.`);
   }
 
+  const media = migrationSql.get("0005_media_pipeline") ?? "";
+  for (const field of [
+    "media_upload_intents",
+    "token_hash",
+    "moderation_status",
+    "quarantined",
+    "media_moderation_events",
+    "sha256",
+    "storage_etag",
+    "8388608",
+  ]) {
+    assert(media.includes(field), `Media migration is missing ${field}.`);
+  }
+
   const wrangler = await readFile(path.join(root, "wrangler.d1.jsonc"), "utf8");
   assert(wrangler.includes('"migrations_pattern": "migrations/d1/*/migration.sql"'), "Wrangler is not using the authoritative nested migration layout.");
 }
@@ -180,6 +195,21 @@ async function validateAuthFoundation() {
   const middleware = await readFile(path.join(root, "src", "middleware.ts"), "utf8");
   assert(middleware.includes("https://challenges.cloudflare.com"), "Content Security Policy does not allow the Turnstile origin.");
   assert(middleware.includes("getAuthContext"), "Authentication context is not loaded by middleware.");
+}
+
+async function validateMediaFoundation() {
+  const source = await readFile(path.join(root, "src", "lib", "media.ts"), "utf8");
+  assert(source.includes("MAX_MEDIA_BYTES = 8 * 1024 * 1024"), "Media upload size limit changed unexpectedly.");
+  assert(source.includes('"image/jpeg"') && source.includes('"image/png"') && source.includes('"image/webp"'), "Approved image MIME types are incomplete.");
+  assert(!source.includes('"image/svg+xml"'), "SVG uploads must remain disabled.");
+  assert(source.includes("parsePng") && source.includes("parseJpeg") && source.includes("parseWebp"), "Image signature and dimension validation is incomplete.");
+  assert(source.includes("claimUploadIntent"), "One-time media upload intent claiming is missing.");
+  assert(source.includes("media_moderation_events"), "Media moderation audit events are missing.");
+
+  const delivery = await readFile(path.join(root, "src", "pages", "media", "[...key].ts"), "utf8");
+  assert(delivery.includes('moderation_status === "approved"'), "Public media delivery is not approval-gated.");
+  assert(delivery.includes('"private, no-store"'), "Pending media previews must remain private and uncached.");
+  assert(delivery.includes('"nosniff"'), "Media delivery must prevent content sniffing.");
 }
 
 async function validateBrowserScripts() {
@@ -210,6 +240,7 @@ validateCategories();
 validateRecipes();
 await validateMigrations();
 await validateAuthFoundation();
+await validateMediaFoundation();
 await validateBrowserScripts();
 
 if (errors.length > 0) {
@@ -218,4 +249,4 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, authoritative nested D1 migrations, authentication invariants, and public browser scripts.`);
+console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, authoritative D1 migrations, authentication and media invariants, and public browser scripts.`);
