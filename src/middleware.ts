@@ -35,7 +35,10 @@ const privatePaths = new Set([
 ]);
 
 function isPrivatePath(pathname: string): boolean {
-  return privatePaths.has(pathname) || /^\/recipes\/[^/]+\/cook\/?$/.test(pathname);
+  return privatePaths.has(pathname)
+    || pathname.startsWith("/api/media/")
+    || pathname.startsWith("/admin/")
+    || /^\/recipes\/[^/]+\/cook\/?$/.test(pathname);
 }
 
 export const onRequest = defineMiddleware(async (context, next) => {
