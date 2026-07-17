@@ -45,6 +45,8 @@ const isCurrent = (href: string) => pathname === href || pathname.startsWith(`${
     <meta name="theme-color" content="#fffdf8" />
     <meta name="geo.region" content={market.code} />
     <link rel="canonical" href={canonical} />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/ozzyl-recipes.svg" type="image/svg+xml" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
@@ -134,5 +136,6 @@ const isCurrent = (href: string) => pathname === href || pathname.startsWith(`${
 
     <script src="/scripts/kitchen-state.js" defer></script>
     <script src="/scripts/saved-recipes.js" defer></script>
+    <script src="/scripts/register-sw.js" defer></script>
   </body>
 </html>
