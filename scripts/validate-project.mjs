@@ -1,0 +1,151 @@
+import { readdir, readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import { fallbackCategories, fallbackRecipes } from "../src/data/fallback-recipes.ts";
+import { markets } from "../src/lib/market.ts";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const errors = [];
+
+function fail(message) {
+  errors.push(message);
+}
+
+function assert(condition, message) {
+  if (!condition) fail(message);
+}
+
+function findDuplicates(values) {
+  const seen = new Set();
+  const duplicates = new Set();
+  for (const value of values) {
+    if (seen.has(value)) duplicates.add(value);
+    seen.add(value);
+  }
+  return [...duplicates];
+}
+
+function validateCategories() {
+  const allowedTypes = new Set(["meal", "ingredient", "cuisine", "occasion", "diet", "collection", "method"]);
+  const duplicateIds = findDuplicates(fallbackCategories.map((category) => category.id));
+  const duplicateSlugs = findDuplicates(fallbackCategories.map((category) => category.slug));
+
+  assert(duplicateIds.length === 0, `Duplicate category IDs: ${duplicateIds.join(", ")}`);
+  assert(duplicateSlugs.length === 0, `Duplicate category slugs: ${duplicateSlugs.join(", ")}`);
+
+  for (const category of fallbackCategories) {
+    assert(category.id.trim().length > 0, "Every category requires an ID.");
+    assert(/^[a-z0-9-]+$/.test(category.slug), `Invalid category slug: ${category.slug}`);
+    assert(category.name.trim().length >= 2, `Category name is too short: ${category.slug}`);
+    assert(allowedTypes.has(category.type), `Unsupported category type ${category.type} on ${category.slug}`);
+  }
+}
+
+function validateRecipes() {
+  const categorySlugs = new Set(fallbackCategories.map((category) => category.slug));
+  const supportedMarketCodes = new Set(markets.map((market) => market.code));
+  const duplicateIds = findDuplicates(fallbackRecipes.map((recipe) => recipe.id));
+  const duplicateSlugs = findDuplicates(fallbackRecipes.map((recipe) => recipe.slug));
+  const duplicateIngredientIds = findDuplicates(fallbackRecipes.flatMap((recipe) => recipe.ingredients.map((ingredient) => ingredient.id)));
+  const duplicateStepIds = findDuplicates(fallbackRecipes.flatMap((recipe) => recipe.steps.map((step) => step.id)));
+
+  assert(duplicateIds.length === 0, `Duplicate recipe IDs: ${duplicateIds.join(", ")}`);
+  assert(duplicateSlugs.length === 0, `Duplicate recipe slugs: ${duplicateSlugs.join(", ")}`);
+  assert(duplicateIngredientIds.length === 0, `Duplicate ingredient IDs: ${duplicateIngredientIds.join(", ")}`);
+  assert(duplicateStepIds.length === 0, `Duplicate step IDs: ${duplicateStepIds.join(", ")}`);
+
+  for (const market of markets) {
+    const marketRecipes = fallbackRecipes.filter((recipe) => recipe.country_code === market.code);
+    assert(marketRecipes.length >= 1, `No fallback recipe exists for ${market.name} (${market.code}).`);
+  }
+
+  for (const recipe of fallbackRecipes) {
+    const label = `${recipe.title} (${recipe.slug})`;
+    assert(/^[a-z0-9-]+$/.test(recipe.slug), `Invalid recipe slug: ${recipe.slug}`);
+    assert(recipe.title.trim().length >= 5 && recipe.title.length <= 120, `Invalid title length for ${label}`);
+    assert(recipe.summary.trim().length >= 20 && recipe.summary.length <= 240, `Invalid summary length for ${label}`);
+    assert(Boolean(recipe.description?.trim()), `Missing description for ${label}`);
+    assert(supportedMarketCodes.has(recipe.country_code), `Unsupported country ${recipe.country_code} for ${label}`);
+    assert(Number.isInteger(recipe.prep_minutes) && recipe.prep_minutes >= 0, `Invalid prep time for ${label}`);
+    assert(Number.isInteger(recipe.cook_minutes) && recipe.cook_minutes >= 0, `Invalid cook time for ${label}`);
+    assert(Number.isInteger(recipe.servings) && recipe.servings > 0, `Invalid servings for ${label}`);
+    assert(["easy", "medium", "hard"].includes(recipe.difficulty), `Invalid difficulty for ${label}`);
+    assert(recipe.average_rating >= 0 && recipe.average_rating <= 5, `Invalid rating for ${label}`);
+    assert(Number.isInteger(recipe.rating_count) && recipe.rating_count >= 0, `Invalid rating count for ${label}`);
+    assert(Number.isInteger(recipe.save_count) && recipe.save_count >= 0, `Invalid save count for ${label}`);
+    assert(Number.isInteger(recipe.view_count) && recipe.view_count >= 0, `Invalid view count for ${label}`);
+    assert(recipe.image_url === null || recipe.image_url.startsWith("https://"), `Recipe image must use HTTPS for ${label}`);
+    assert(recipe.ingredients.length >= 2, `At least two ingredients are required for ${label}`);
+    assert(recipe.steps.length >= 2, `At least two directions are required for ${label}`);
+    assert(recipe.categories.length >= 1, `At least one category is required for ${label}`);
+
+    const categoryDuplicates = findDuplicates(recipe.categories.map((category) => category.slug));
+    assert(categoryDuplicates.length === 0, `Duplicate categories on ${label}: ${categoryDuplicates.join(", ")}`);
+
+    for (const category of recipe.categories) {
+      assert(categorySlugs.has(category.slug), `Unknown category ${category.slug} referenced by ${label}`);
+    }
+
+    const ingredientOrder = recipe.ingredients.map((ingredient) => ingredient.sort_order);
+    const expectedIngredientOrder = recipe.ingredients.map((_, index) => index + 1);
+    assert(JSON.stringify(ingredientOrder) === JSON.stringify(expectedIngredientOrder), `Ingredient sort order is not sequential for ${label}`);
+
+    for (const ingredient of recipe.ingredients) {
+      assert(ingredient.item.trim().length >= 2, `Invalid ingredient name ${ingredient.id} on ${label}`);
+      assert(ingredient.amount === null || ingredient.amount.length <= 32, `Ingredient amount is too long on ${label}`);
+      assert(ingredient.unit === null || ingredient.unit.length <= 32, `Ingredient unit is too long on ${label}`);
+    }
+
+    const stepOrder = recipe.steps.map((step) => step.sort_order);
+    const expectedStepOrder = recipe.steps.map((_, index) => index + 1);
+    assert(JSON.stringify(stepOrder) === JSON.stringify(expectedStepOrder), `Step sort order is not sequential for ${label}`);
+
+    for (const step of recipe.steps) {
+      assert(step.instruction.trim().length >= 10, `Direction ${step.id} is too short on ${label}`);
+      assert(step.timer_seconds === null || step.timer_seconds >= 0, `Invalid timer on ${label}`);
+    }
+  }
+}
+
+async function validateMigrations() {
+  const migrationDirectory = path.join(root, "migrations");
+  const filenames = (await readdir(migrationDirectory))
+    .filter((filename) => filename.endsWith(".sql"))
+    .sort();
+
+  assert(filenames.length >= 3, "Expected at least three D1 migrations.");
+
+  filenames.forEach((filename, index) => {
+    assert(/^\d{4}_[a-z0-9_]+\.sql$/.test(filename), `Invalid migration filename: ${filename}`);
+    const expectedPrefix = String(index + 1).padStart(4, "0");
+    assert(filename.startsWith(`${expectedPrefix}_`), `Migration order gap: expected ${expectedPrefix}, found ${filename}`);
+  });
+
+  for (const filename of filenames) {
+    const sql = await readFile(path.join(migrationDirectory, filename), "utf8");
+    assert(sql.trim().length > 0, `Migration is empty: ${filename}`);
+    assert(sql.includes(";"), `Migration contains no SQL statement terminator: ${filename}`);
+  }
+
+  const initial = await readFile(path.join(migrationDirectory, "0001_initial.sql"), "utf8");
+  assert(initial.includes("measurement_system"), "Initial migration is missing measurement_system.");
+  assert(initial.includes("recipe_localizations"), "Initial migration is missing recipe_localizations.");
+  assert(initial.includes("recipe_nutrition"), "Initial migration is missing recipe_nutrition.");
+
+  const coverage = await readFile(path.join(migrationDirectory, "0003_market_coverage.sql"), "utf8");
+  for (const code of ["CA", "NZ", "DE", "CH", "SE", "NL"]) {
+    assert(coverage.includes(`'${code}'`), `Market coverage migration is missing ${code}.`);
+  }
+}
+
+validateCategories();
+validateRecipes();
+await validateMigrations();
+
+if (errors.length > 0) {
+  console.error(`Project validation failed with ${errors.length} issue${errors.length === 1 ? "" : "s"}:`);
+  for (const error of errors) console.error(`- ${error}`);
+  process.exit(1);
+}
+
+console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, and ordered D1 migrations.`);
