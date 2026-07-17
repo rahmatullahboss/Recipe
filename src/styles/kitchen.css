@@ -1,0 +1,314 @@
+.nav-count {
+  display: inline-grid;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  margin-left: 0.3rem;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--brand-dark);
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.kitchen-shell {
+  display: grid;
+  gap: 28px;
+}
+
+.kitchen-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--white);
+}
+
+.kitchen-toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.kitchen-status {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.shopping-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shopping-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--white);
+}
+
+.shopping-item input[type="checkbox"] {
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: 0.18rem;
+  accent-color: var(--green);
+}
+
+.shopping-item__name {
+  display: block;
+  font-weight: 850;
+}
+
+.shopping-item__meta {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.shopping-item.is-checked {
+  opacity: 0.62;
+}
+
+.shopping-item.is-checked .shopping-item__name {
+  text-decoration: line-through;
+}
+
+.icon-button {
+  min-width: 38px;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.meal-plan-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.week-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.meal-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.meal-day {
+  min-height: 260px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--white);
+}
+
+.meal-day__date {
+  margin: 0;
+  color: var(--brand-dark);
+  font-size: 0.78rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.meal-day h2 {
+  margin: 4px 0 16px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.25rem;
+}
+
+.meal-day select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+}
+
+.meal-card-mini {
+  display: grid;
+  gap: 10px;
+}
+
+.meal-card-mini img {
+  aspect-ratio: 4 / 3;
+  border-radius: 12px;
+  object-fit: cover;
+}
+
+.meal-card-mini strong {
+  line-height: 1.25;
+}
+
+.meal-card-mini__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cook-shell {
+  min-height: calc(100vh - 76px);
+  padding: 30px 0 60px;
+  background: var(--surface);
+}
+
+.cook-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.cook-progress {
+  width: min(420px, 100%);
+}
+
+.cook-progress progress {
+  width: 100%;
+  height: 12px;
+  accent-color: var(--brand);
+}
+
+.cook-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr);
+  gap: 28px;
+  align-items: start;
+}
+
+.cook-panel,
+.cook-step-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--white);
+  box-shadow: var(--shadow);
+}
+
+.cook-panel {
+  padding: 24px;
+}
+
+.cook-ingredient-list {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cook-ingredient-list label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.cook-step-card {
+  padding: clamp(28px, 5vw, 60px);
+}
+
+.cook-step-number {
+  margin: 0 0 12px;
+  color: var(--brand-dark);
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.cook-step-text {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.8rem, 4vw, 3.4rem);
+  line-height: 1.18;
+}
+
+.cook-navigation,
+.timer-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+.cook-timer {
+  margin-top: 28px;
+  padding: 20px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.cook-timer__display {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(2.4rem, 6vw, 4.8rem);
+  font-weight: 900;
+  line-height: 1;
+}
+
+@media (max-width: 1120px) {
+  .meal-plan-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 800px) {
+  .meal-plan-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cook-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .meal-plan-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .shopping-item {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .shopping-item .icon-button {
+    grid-column: 2;
+    justify-self: end;
+  }
+
+  .kitchen-toolbar,
+  .meal-plan-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .kitchen-toolbar__actions .button,
+  .week-controls .button {
+    flex: 1;
+  }
+}
