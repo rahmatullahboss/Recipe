@@ -45,6 +45,7 @@
 - Browser-autosaved international recipe draft editor
 - Country, language, measurement, taxonomy, timing, ingredients, and directions
 - Dynamic rows, live preview, Worker validation, field errors, and JSON export
+- Optional media asset reference retained in the structured local draft
 
 ### D1 schema and migration readiness
 
@@ -54,6 +55,7 @@
   - `migrations/d1/0002_seed/migration.sql`
   - `migrations/d1/0003_market_coverage/migration.sql`
   - `migrations/d1/0004_auth_accounts/migration.sql`
+  - `migrations/d1/0005_media_pipeline/migration.sql`
 - `migrations_pattern` restricts Wrangler to the authoritative nested sequence
 - Separate D1-free and D1-enabled Wrangler configurations
 
@@ -77,50 +79,74 @@
 - Non-secret auth readiness diagnostics in `/api/health`
 - Terms draft and versioned consent input
 
+### Guarded R2 media foundation
+
+- Independent `MEDIA_UPLOADS_ENABLED` flag, disabled in checked-in configuration
+- D1 one-time upload intents with token digests and ten-minute expiry
+- Server-generated R2 object keys and contributor ownership
+- JPEG, PNG, and WebP allowlist; SVG disabled
+- 8 MB size cap, raster signature checks, dimension limits, and raw SHA-256 checksums
+- Expected MIME and byte-size matching before R2 storage
+- Private pending assets and owner-only previews
+- Contributor asset listing and local draft attachment
+- Editor/admin moderation queue at `/admin/media`
+- Approved, rejected, quarantined, and pending states
+- Server-enforced reasons for reject and quarantine decisions
+- D1 trigger-backed moderation transition history
+- Anonymous R2 delivery only for uploaded and approved D1 assets
+- Private no-store preview caching and immutable approved delivery with ETags
+- Non-secret media readiness diagnostics in `/api/health`
+- Dedicated media architecture, activation, testing, and rollback documentation
+
 ### Operations and security
 
 - Pull-request CI on Node.js 24
-- Catalogue, taxonomy, market, nested migration, auth-invariant, and browser-script validation
+- Catalogue, taxonomy, market, nested migration, auth-invariant, media-invariant, and browser-script validation
 - Automatic D1-free deployment workflow
 - Guarded future D1 provisioning/migration workflow
+- Guarded account workflow with independent registration and contributor-media inputs
 - Credential and deployed-health checks
 - R2 missing-binding handling
 - Astro middleware CSP, HSTS, frame, MIME, referrer, permissions, and cross-origin controls
 - Private route `no-store` and `noindex` controls
-- Cloudflare, D1 authentication, activation, and rollback documentation
+- Cloudflare, D1 authentication, media activation, and rollback documentation
 
 ## Current deployment mode
 
 ```text
-wrangler.jsonc → static-fallback data mode → no D1 account writes
+wrangler.jsonc → static-fallback data mode → no D1 account or media writes
 ```
 
-D1 and accounts are not required for the current public application.
+D1, accounts, and contributor media are not required for the current public application.
 
-## Future D1 deployment
+## Future guarded D1 deployment
 
 ```text
 wrangler.d1.jsonc
-  → provision DB binding
+  → provision DB and R2 bindings
   → apply authoritative nested migrations
   → deploy D1 recipe reads
   → keep AUTH_ENABLED=false
+  → keep AUTH_REGISTRATION_ENABLED=false
+  → keep MEDIA_UPLOADS_ENABLED=false
   → configure secrets, Turnstile, and email webhook
   → enable sign-in
+  → provision editor/admin accounts and test moderation
+  → optionally enable contributor media
   → approve legal/email testing
-  → enable registration last
+  → enable registration separately and last
 ```
 
-Public recipe queries fall back to the versioned catalogue if D1 reads fail.
+Public recipe queries fall back to the versioned catalogue if D1 reads fail. Turning media uploads off stops new intents and raw uploads without removing approved public assets or editorial access.
 
 ## Remaining production phases
 
-1. Provision D1 and execute the documented non-production authentication test matrix
+1. Provision a non-production D1/R2 environment and execute the documented account and media test matrices
 2. Approve Terms and Privacy text for the operating company and jurisdiction
 3. Configure the verification email provider/webhook and sender domain
 4. Provision initial administrator/editor credentials through a controlled process
-5. Signed R2 uploads, media metadata, and moderation
-6. D1-backed recipe publishing and editorial review
-7. Account-synchronised saves, shopping lists, meal plans, ratings, reviews, comments, and collections
-8. Password reset, email change, account deletion, and administration interfaces using the prepared D1 tables
-9. Nutrition editing, taxonomy/localisation administration, queued jobs, search indexing, recommendations, analytics, and advertising controls
+5. Add privacy-safe image derivatives, metadata stripping, orientation normalisation, and optional automated scanning
+6. Implement D1-backed recipe submission, asset ownership checks, editorial review, and publishing transactions
+7. Add account-synchronised saves, shopping lists, meal plans, ratings, reviews, comments, and collections
+8. Add password reset, email change, account deletion, and administration interfaces using the prepared D1 tables
+9. Add nutrition editing, taxonomy/localisation administration, queued jobs, search indexing, recommendations, analytics, and advertising controls
