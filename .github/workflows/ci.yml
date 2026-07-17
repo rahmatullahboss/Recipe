@@ -31,3 +31,6 @@ jobs:
 
       - name: Build Astro Cloudflare Worker
         run: npm run build
+
+      - name: Validate Wrangler production bundle
+        run: npx wrangler deploy --dry-run --config wrangler.jsonc --outdir .wrangler/dry-run
