@@ -1,0 +1,23 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { markets } from "../../lib/market";
+---
+
+<BaseLayout title="Recipe Markets — Ozzyl Recipes" description="Browse recipe collections for leading food markets across North America, Europe, Australia, and New Zealand.">
+  <section class="section">
+    <div class="container">
+      <p class="eyebrow">International discovery</p>
+      <h1 class="section-title">Choose a recipe market</h1>
+      <p class="section-copy">Open a country collection to see that market's recipes first, followed by relevant dishes from the wider international catalogue.</p>
+
+      <div class="feature-strip" style="margin-top:36px">
+        {markets.map((market) => (
+          <a class="feature-item" href={`/markets/${market.code.toLowerCase()}`}>
+            <strong>{market.name}</strong>
+            <span>{market.measurementSystem === "us" ? "US customary measurements" : "Metric measurements"} · {market.locale}</span>
+          </a>
+        ))}
+      </div>
+    </div>
+  </section>
+</BaseLayout>
