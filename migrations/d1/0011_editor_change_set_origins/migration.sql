@@ -8,8 +8,8 @@ CREATE TABLE recipe_change_set_origins (
     'approved_change_set_proposed',
     'approved_change_set_baseline'
   )),
-  source_snapshot_id TEXT REFERENCES recipe_revision_snapshots(id) ON DELETE SET NULL,
-  source_change_set_id TEXT REFERENCES recipe_change_sets(id) ON DELETE SET NULL,
+  source_snapshot_id TEXT,
+  source_change_set_id TEXT,
   source_content_revision INTEGER CHECK (source_content_revision IS NULL OR source_content_revision >= 1),
   media_fallback_applied INTEGER NOT NULL DEFAULT 0 CHECK (media_fallback_applied IN (0, 1)),
   created_by TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
