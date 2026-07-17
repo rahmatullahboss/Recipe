@@ -1,0 +1,55 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { listCategories } from "../../lib/db";
+
+const categories = await listCategories(100);
+const groups = [
+  { type: "meal", title: "Meals" },
+  { type: "cuisine", title: "Cuisines" },
+  { type: "method", title: "Cooking methods" },
+  { type: "collection", title: "Collections" },
+  { type: "ingredient", title: "Ingredients" },
+  { type: "occasion", title: "Occasions" },
+  { type: "diet", title: "Diets" },
+].map((group) => ({
+  ...group,
+  categories: categories.filter((category) => category.type === group.type),
+})).filter((group) => group.categories.length > 0);
+---
+
+<BaseLayout
+  title="Recipe Categories and Cuisines — Ozzyl Recipes"
+  description="Browse international recipes by meal, cuisine, cooking method, collection, ingredient, occasion, and diet."
+>
+  <section class="section section--soft">
+    <div class="container">
+      <p class="eyebrow">Recipe library</p>
+      <h1 class="section-title">Browse by category</h1>
+      <p class="section-copy">Move from a broad international catalogue into focused meal, cuisine, method, and collection pages.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container taxonomy-groups">
+      {groups.map((group) => (
+        <section class="taxonomy-group">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">{group.categories.length} {group.categories.length === 1 ? "collection" : "collections"}</p>
+              <h2 class="section-title">{group.title}</h2>
+            </div>
+          </div>
+          <div class="taxonomy-grid">
+            {group.categories.map((category) => (
+              <a class="taxonomy-card" href={`/categories/${category.slug}`}>
+                <span class="taxonomy-card__type">{category.type}</span>
+                <strong>{category.name}</strong>
+                <span>Explore {category.name.toLowerCase()} recipes →</span>
+              </a>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  </section>
+</BaseLayout>
