@@ -17,6 +17,11 @@ on:
         required: true
         default: false
         type: boolean
+      enable_recipe_submissions:
+        description: Open atomic D1 recipe submissions and editorial publishing after media review is tested
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -53,6 +58,8 @@ jobs:
           TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
           AUTH_EMAIL_WEBHOOK_URL: ${{ vars.AUTH_EMAIL_WEBHOOK_URL }}
           ENABLE_REGISTRATION: ${{ inputs.enable_registration }}
+          ENABLE_MEDIA_UPLOADS: ${{ inputs.enable_media_uploads }}
+          ENABLE_RECIPE_SUBMISSIONS: ${{ inputs.enable_recipe_submissions }}
         run: |
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "CLOUDFLARE_ACCOUNT_ID is not configured"; exit 1; }
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN is not configured"; exit 1; }
@@ -64,11 +71,15 @@ jobs:
             test -n "$AUTH_EMAIL_WEBHOOK_URL" || { echo "AUTH_EMAIL_WEBHOOK_URL environment variable is not configured"; exit 1; }
             test -n "$AUTH_EMAIL_WEBHOOK_TOKEN" || { echo "AUTH_EMAIL_WEBHOOK_TOKEN is not configured"; exit 1; }
           fi
+          if [ "$ENABLE_RECIPE_SUBMISSIONS" = "true" ] && [ "$ENABLE_MEDIA_UPLOADS" != "true" ]; then
+            echo "Recipe submissions require enable_media_uploads=true"
+            exit 1
+          fi
 
       - name: Install locked dependencies
         run: npm ci
 
-      - name: Validate project, account, and media migrations
+      - name: Validate project, account, media, and recipe migrations
         run: npm run validate
 
       - name: Build D1 Worker
@@ -85,18 +96,25 @@ jobs:
           AUTH_FROM_EMAIL: ${{ vars.AUTH_FROM_EMAIL }}
           ENABLE_REGISTRATION: ${{ inputs.enable_registration }}
           ENABLE_MEDIA_UPLOADS: ${{ inputs.enable_media_uploads }}
+          ENABLE_RECIPE_SUBMISSIONS: ${{ inputs.enable_recipe_submissions }}
         run: |
           node --input-type=module <<'NODE'
           import fs from "node:fs";
 
           const registrationEnabled = process.env.ENABLE_REGISTRATION === "true";
           const mediaUploadsEnabled = process.env.ENABLE_MEDIA_UPLOADS === "true";
+          const recipeSubmissionsEnabled = process.env.ENABLE_RECIPE_SUBMISSIONS === "true";
+          if (recipeSubmissionsEnabled && !mediaUploadsEnabled) {
+            throw new Error("Recipe submissions require moderated media uploads.");
+          }
+
           const config = JSON.parse(fs.readFileSync("wrangler.d1.jsonc", "utf8"));
           config.vars = {
             ...(config.vars ?? {}),
             AUTH_ENABLED: "true",
             AUTH_REGISTRATION_ENABLED: String(registrationEnabled),
             MEDIA_UPLOADS_ENABLED: String(mediaUploadsEnabled),
+            RECIPE_SUBMISSIONS_ENABLED: String(recipeSubmissionsEnabled),
             TURNSTILE_SITE_KEY: process.env.TURNSTILE_SITE_KEY,
           };
 
@@ -119,7 +137,7 @@ jobs:
           fs.writeFileSync(".auth-secrets.json", JSON.stringify(secrets), { mode: 0o600 });
           NODE
 
-      - name: Provision D1 Worker with accounts and uploads disabled
+      - name: Provision D1 Worker with accounts and trusted writes disabled
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -142,11 +160,12 @@ jobs:
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
           command: deploy --config .wrangler.auth.json --secrets-file .auth-secrets.json
 
-      - name: Verify account and media deployment
+      - name: Verify account, media, and recipe deployment
         env:
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment-url }}
           EXPECT_REGISTRATION: ${{ inputs.enable_registration }}
           EXPECT_MEDIA_UPLOADS: ${{ inputs.enable_media_uploads }}
+          EXPECT_RECIPE_SUBMISSIONS: ${{ inputs.enable_recipe_submissions }}
         run: |
           test -n "$DEPLOYMENT_URL" || { echo "Wrangler did not return a deployment URL"; exit 1; }
           HEALTH_JSON=$(curl --fail --silent --show-error --retry 5 --retry-delay 3 "$DEPLOYMENT_URL/api/health")
@@ -155,6 +174,7 @@ jobs:
             const health = JSON.parse(process.env.HEALTH_JSON ?? "{}");
             const expectRegistration = process.env.EXPECT_REGISTRATION === "true";
             const expectMediaUploads = process.env.EXPECT_MEDIA_UPLOADS === "true";
+            const expectRecipeSubmissions = process.env.EXPECT_RECIPE_SUBMISSIONS === "true";
             const failures = [];
             if (health.ok !== true) failures.push("health.ok is not true");
             if (health.dataMode !== "d1") failures.push(`unexpected dataMode: ${health.dataMode}`);
@@ -165,12 +185,15 @@ jobs:
             if (health.media?.uploadsEnabled !== expectMediaUploads) failures.push("media upload flag does not match the workflow input");
             if (health.media?.storageReady !== true) failures.push("media storage is not ready");
             if (expectMediaUploads && health.media?.ready !== true) failures.push("media uploads are not ready");
+            if (health.recipeSubmissions?.enabled !== expectRecipeSubmissions) failures.push("recipe submission flag does not match the workflow input");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.ready !== true) failures.push("recipe submissions are not ready");
+            if (expectRecipeSubmissions && expectMediaUploads !== true) failures.push("recipe submissions were requested without media uploads");
             if (failures.length) {
               console.error(failures.join("\n"));
               process.exit(1);
             }
           '
-          echo "Account and media deployment completed and verified: $DEPLOYMENT_URL"
+          echo "Account, media, and recipe deployment completed and verified: $DEPLOYMENT_URL"
 
       - name: Remove ephemeral secret files
         if: always()
