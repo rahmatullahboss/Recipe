@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -138,9 +139,34 @@ async function validateMigrations() {
   }
 }
 
+async function validateBrowserScripts() {
+  const scriptsDirectory = path.join(root, "public", "scripts");
+  const scriptNames = (await readdir(scriptsDirectory))
+    .filter((filename) => filename.endsWith(".js"))
+    .sort();
+  const files = [
+    ...scriptNames.map((filename) => path.join(scriptsDirectory, filename)),
+    path.join(root, "public", "sw.js"),
+  ];
+
+  assert(files.length >= 2, "No public browser scripts were found for validation.");
+
+  for (const filename of files) {
+    const result = spawnSync(process.execPath, ["--check", filename], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    if (result.status !== 0) {
+      const relative = path.relative(root, filename);
+      fail(`Invalid JavaScript syntax in ${relative}: ${(result.stderr || result.stdout || "unknown syntax error").trim()}`);
+    }
+  }
+}
+
 validateCategories();
 validateRecipes();
 await validateMigrations();
+await validateBrowserScripts();
 
 if (errors.length > 0) {
   console.error(`Project validation failed with ${errors.length} issue${errors.length === 1 ? "" : "s"}:`);
@@ -148,4 +174,4 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, and ordered D1 migrations.`);
+console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, ordered D1 migrations, and public browser scripts.`);
