@@ -1,0 +1,32 @@
+---
+import type { RecipeSummary } from "../lib/db";
+
+type Props = {
+  recipe: RecipeSummary;
+};
+
+const { recipe } = Astro.props;
+const totalMinutes = recipe.prep_minutes + recipe.cook_minutes;
+---
+
+<article class="recipe-card">
+  <a class="recipe-card__image" href={`/recipes/${recipe.slug}`} aria-label={`View ${recipe.title}`}>
+    <img
+      src={recipe.image_url ?? "/images/recipe-placeholder.svg"}
+      alt={recipe.title}
+      loading="lazy"
+      width="800"
+      height="600"
+    />
+    {recipe.is_featured === 1 && <span class="recipe-card__badge">Editor favorite</span>}
+  </a>
+  <div class="recipe-card__body">
+    <h3><a href={`/recipes/${recipe.slug}`}>{recipe.title}</a></h3>
+    <p>{recipe.summary}</p>
+    <div class="recipe-card__meta">
+      <span>{totalMinutes} min</span>
+      <span>{recipe.difficulty}</span>
+      <span class="rating">★ {recipe.average_rating.toFixed(1)} ({recipe.rating_count})</span>
+    </div>
+  </div>
+</article>
