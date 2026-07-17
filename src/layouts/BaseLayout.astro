@@ -1,0 +1,77 @@
+---
+import "../styles/global.css";
+
+type Props = {
+  title?: string;
+  description?: string;
+  image?: string;
+};
+
+const {
+  title = "Ozzyl Recipes — Cook Something Worth Sharing",
+  description = "Discover dependable recipes, practical cooking guides, and community favorites.",
+  image = "",
+} = Astro.props;
+
+const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url.origin);
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#fffdf8" />
+    <link rel="canonical" href={canonical} />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    {image && <meta property="og:image" content={image} />}
+    <meta name="twitter:card" content={image ? "summary_large_image" : "summary"} />
+    <title>{title}</title>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container header-row">
+        <a class="brand" href="/" aria-label="Ozzyl Recipes home">
+          <span class="brand-mark">OR</span>
+          <span>Ozzyl Recipes</span>
+        </a>
+        <nav class="main-nav" aria-label="Main navigation">
+          <a href="/search">Recipes</a>
+          <a href="/search?q=quick">Quick & Easy</a>
+          <a href="/search?q=chicken">Ingredients</a>
+          <a href="/search?q=Bangladeshi">Cuisines</a>
+        </nav>
+        <div class="nav-actions">
+          <a class="button button--ghost" href="/login">Sign in</a>
+          <a class="button" href="/recipes/new">Add recipe</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <slot />
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-row">
+        <div>
+          <a class="brand" href="/">
+            <span class="brand-mark">OR</span>
+            <span>Ozzyl Recipes</span>
+          </a>
+          <p class="footer-copy">
+            An original recipe discovery community built on Cloudflare Workers for fast, reliable cooking inspiration everywhere.
+          </p>
+        </div>
+        <div>
+          <strong>Explore</strong>
+          <p class="footer-copy"><a href="/search">All recipes</a> · <a href="/about">About</a> · <a href="/privacy">Privacy</a></p>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
