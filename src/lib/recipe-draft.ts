@@ -21,6 +21,7 @@ export type RecipeDraft = {
   title: string;
   summary: string;
   description: string;
+  mediaAssetId: string | null;
   countryCode: string;
   languageCode: RecipeLanguage;
   measurementSystem: MeasurementSystem;
@@ -91,6 +92,8 @@ export function validateRecipeDraft(input: unknown): DraftValidationResult {
   const title = cleanText(source.title);
   const summary = cleanText(source.summary);
   const description = cleanText(source.description);
+  const mediaAssetText = cleanText(source.mediaAssetId);
+  const mediaAssetId = mediaAssetText || null;
   const countryCode = cleanText(source.countryCode).toUpperCase();
   const requestedLanguage = cleanText(source.languageCode).toLowerCase();
   const languageCode = supportedRecipeLanguages.includes(requestedLanguage as RecipeLanguage)
@@ -109,6 +112,9 @@ export function validateRecipeDraft(input: unknown): DraftValidationResult {
   addLengthError(errors, "title", title, 5, 120);
   addLengthError(errors, "summary", summary, 20, 240);
   addMaximumError(errors, "description", description, 5000);
+  if (mediaAssetId && !/^media_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(mediaAssetId)) {
+    errors.push({ path: "mediaAssetId", message: "Attached media reference is invalid." });
+  }
   if (!isSupportedMarket(countryCode)) {
     errors.push({ path: "countryCode", message: "Select a supported recipe market." });
   }
@@ -189,6 +195,7 @@ export function validateRecipeDraft(input: unknown): DraftValidationResult {
     title,
     summary,
     description,
+    mediaAssetId,
     countryCode,
     languageCode,
     measurementSystem,
