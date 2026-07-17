@@ -1,0 +1,49 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import RecipeCard from "../components/RecipeCard.astro";
+import { listRecipes } from "../lib/db";
+import { resolveMarket } from "../lib/market";
+
+const market = resolveMarket(Astro.request, Astro.url);
+const recipes = await listRecipes({ country: market.code, limit: 48 });
+---
+
+<BaseLayout
+  title="Saved Recipes — Ozzyl Recipes"
+  description="Keep a personal browser collection of international recipes to cook later."
+>
+  <section class="section" data-saved-page>
+    <div class="container">
+      <div class="saved-page-intro">
+        <div>
+          <p class="eyebrow">Your cooking list</p>
+          <h1 class="section-title">Saved recipes</h1>
+          <p class="section-copy">This private collection is stored in this browser. Account sync will be enabled when authentication and D1 are available.</p>
+        </div>
+        <div class="feature-item">
+          <strong><span data-saved-count>0</span> saved</strong>
+          <span>Available on this device</span>
+        </div>
+      </div>
+
+      <div class="empty-state" data-saved-loading style="margin-top:42px">
+        <h2>Loading your saved recipes</h2>
+        <p>Checking this browser's private collection.</p>
+      </div>
+
+      <div class="empty-state" data-saved-empty hidden style="margin-top:42px">
+        <h2>No saved recipes yet</h2>
+        <p>Use the heart button on any recipe card or the Save button on a recipe page.</p>
+        <a class="button" href="/search">Find recipes to save</a>
+      </div>
+
+      <div class="recipe-grid" data-saved-grid hidden style="margin-top:42px">
+        {recipes.map((recipe) => (
+          <div data-saved-card={recipe.slug} hidden>
+            <RecipeCard recipe={recipe} />
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+</BaseLayout>
