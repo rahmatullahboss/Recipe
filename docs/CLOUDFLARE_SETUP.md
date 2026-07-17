@@ -1,23 +1,27 @@
 # Cloudflare and GitHub CI/CD Setup
 
-The project currently deploys without D1. The international static catalogue and browser-local kitchen tools remain operational while the future D1 database and account system stay disabled.
+The project currently deploys without D1. International discovery, cooking, browser-local planning, saves, offline support, and local recipe drafts remain operational while accounts and trusted writes stay disabled.
 
-## 1. Enable the Cloudflare services
+Read [`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md) for the complete project state, safety boundaries, and continuation prompt.
+
+## 1. Cloudflare services
 
 In the target Cloudflare account, confirm:
 
-1. Workers & Pages is enabled and a `workers.dev` subdomain is registered.
-2. R2 is activated.
-3. Cloudflare Images is available if runtime transformations will be used.
-4. A domain is active in Cloudflare only when a custom production hostname will be connected.
+1. Workers & Pages is enabled and a `workers.dev` subdomain exists.
+2. Workers KV is available for sessions and lightweight security state.
+3. R2 is activated for private contributor originals.
+4. D1 capacity is available before running the guarded D1 workflow.
+5. Cloudflare Images is available only if the future derivative implementation chooses that path.
+6. A domain is active in Cloudflare only when a custom hostname will be connected.
 
-Wrangler can provision the draft `SESSION` KV namespace, `MEDIA` R2 bucket, and `IMAGES` binding during the initial D1-free deployment.
+Wrangler can provision draft `SESSION` KV, `MEDIA` R2, and `IMAGES` bindings during deployment. D1 is provisioned only through the guarded D1 workflow.
 
-## 2. Create the deployment API token
+## 2. Deployment API token
 
-Open **My Profile → API Tokens → Create Token**, start from **Edit Cloudflare Workers**, restrict it to the target account, and keep these permissions.
+Create a restricted API token from **My Profile → API Tokens**.
 
-### Required now
+### Required for the current Worker
 
 - Account → Workers Scripts → Edit
 - Account → Workers KV Storage → Edit
@@ -30,21 +34,17 @@ Open **My Profile → API Tokens → Create Token**, start from **Edit Cloudflar
 
 - Zone → Workers Routes → Edit for the selected zone
 
-### Required for Cloudflare Images management
-
-- Account → Cloudflare Images → Edit
-
-### Required later for D1
+### Required for D1 activation
 
 - Account → D1 → Edit
 
-Never commit the token or place it in a tracked environment file.
+### Required only if managing Cloudflare Images
 
-## 3. Find the Account ID
+- Account → Cloudflare Images → Edit
 
-Copy the **Account ID** from the target Cloudflare account dashboard or a zone overview.
+Never commit the token or store it in a tracked environment file.
 
-## 4. Configure GitHub deployment secrets
+## 3. GitHub production environment
 
 Create a GitHub environment named `production` and add:
 
@@ -55,15 +55,24 @@ CLOUDFLARE_API_TOKEN
 
 Recommended protection:
 
-- Restrict deployment branches to `main`.
-- Require approval for production deployments where appropriate.
-- Prevent protection-rule bypass for stricter release control.
+- restrict deployment branches to `main`;
+- require approval for production deployments;
+- prevent protection-rule bypass where stricter release control is needed.
 
-## 5. Enable GitHub Actions
+The guarded authentication workflow later also reads account peppers, Turnstile values, and optional email-delivery configuration. Follow [`D1_AUTH_SETUP.md`](D1_AUTH_SETUP.md) rather than adding unreviewed secrets.
 
-Under **Settings → Actions → General**, allow repository Actions and verified creator actions. Workflow permissions need read access to repository contents. The workflows request their own minimal additional permissions.
+## 4. GitHub Actions
 
-## 6. Current automatic D1-free deployment
+Under **Settings → Actions → General**, allow repository Actions and verified creator actions. Workflows request the permissions they require.
+
+Current workflows:
+
+- `.github/workflows/ci.yml` — pull-request validation and Worker build
+- `.github/workflows/deploy.yml` — D1-free deployment from `main`
+- `.github/workflows/enable-d1.yml` — guarded D1 provisioning/migrations with trusted writes disabled
+- `.github/workflows/enable-auth.yml` — guarded sign-in plus independent registration, media, and recipe submission/revision inputs
+
+## 5. Current automatic D1-free deployment
 
 `.github/workflows/deploy.yml` runs after changes reach `main`:
 
@@ -73,9 +82,9 @@ npm run build
 wrangler deploy --config wrangler.jsonc
 ```
 
-`wrangler.jsonc` has no D1 binding. The application uses `src/data/fallback-recipes.ts` and keeps authentication unavailable.
+`wrangler.jsonc` has no D1 binding. Public recipe data comes from `src/data/fallback-recipes.ts`; account and trusted-write routes fail closed.
 
-After deployment, `/api/health` should include:
+After deployment, `/api/health` should report the equivalent of:
 
 ```json
 {
@@ -85,42 +94,40 @@ After deployment, `/api/health` should include:
 }
 ```
 
-The workflow also checks ten supported markets plus KV, R2, and Images binding readiness.
+The deployment workflow also checks the supported market count and expected KV/R2/Images binding readiness.
 
-## 7. Connect a custom domain
+## 6. Custom domain
 
 After the Worker deploys:
 
 1. Open **Workers & Pages → ozzyl-recipes → Settings → Domains & Routes**.
-2. Add the final production hostname.
-3. Keep Wrangler configuration as the deployment source of truth.
-4. Re-run deployment after DNS and certificate status become active.
+2. Add the intended hostname.
+3. Keep Wrangler configuration as deployment source of truth.
+4. Re-run deployment after DNS and certificate status are active.
+5. Restrict Turnstile to the final hostname before authentication is enabled.
 
-## 8. Enable D1 later
+## 7. Guarded D1 deployment
 
-Do not run this while the account is at its D1 limit.
+Do not run while the account is at its D1 limit or before rollback procedures are understood.
 
-When D1 becomes available:
-
-1. Add **D1 Edit** to the deployment API token.
-2. Open **GitHub → Actions → Enable D1 and Deploy**.
-3. Run it with the exact confirmation value:
+Open **GitHub → Actions → Enable D1 and Deploy** and enter the exact confirmation:
 
 ```text
 ENABLE_D1
 ```
 
-The workflow performs:
+The workflow performs the equivalent of:
 
 ```bash
 npm ci
+npm run validate
 npm run build:d1
 wrangler deploy --config wrangler.d1.jsonc
 wrangler d1 migrations apply DB --remote --config wrangler.d1.jsonc
 wrangler deploy --config wrangler.d1.jsonc
 ```
 
-The first deployment provisions the draft D1 binding. Public recipe queries retain static fallback protection until migrations finish.
+The first deployment provisions the D1 binding. Migrations are then applied before the final D1-mode deployment. Public recipe queries retain static fallback protection if D1 reads fail.
 
 ### Authoritative migration layout
 
@@ -131,6 +138,9 @@ migrations/d1/0001_initial/migration.sql
 migrations/d1/0002_seed/migration.sql
 migrations/d1/0003_market_coverage/migration.sql
 migrations/d1/0004_auth_accounts/migration.sql
+migrations/d1/0005_media_pipeline/migration.sql
+migrations/d1/0006_recipe_editorial/migration.sql
+migrations/d1/0007_recipe_revisions/migration.sql
 ```
 
 `wrangler.d1.jsonc` uses:
@@ -139,9 +149,9 @@ migrations/d1/0004_auth_accounts/migration.sql
 "migrations_pattern": "migrations/d1/*/migration.sql"
 ```
 
-Root-level SQL files are legacy development references and are outside the Wrangler migration execution path.
+Root-level SQL files are legacy references and are outside Wrangler's migration path.
 
-After migration, `/api/health` should report:
+After D1 migration, health should report D1 mode while trusted writes remain disabled:
 
 ```json
 {
@@ -149,64 +159,92 @@ After migration, `/api/health` should report:
   "authentication": {
     "enabled": false,
     "registrationEnabled": false
+  },
+  "media": {
+    "uploadsEnabled": false
+  },
+  "recipeSubmissions": {
+    "enabled": false
   }
 }
 ```
 
-D1 data can therefore run while accounts remain closed.
+## 8. Fail-closed D1 configuration
 
-## 9. Enable D1 authentication separately
-
-Authentication is intentionally controlled by two independent flags in `wrangler.d1.jsonc`:
+Checked-in `wrangler.d1.jsonc` keeps:
 
 ```jsonc
 "AUTH_ENABLED": "false",
-"AUTH_REGISTRATION_ENABLED": "false"
+"AUTH_REGISTRATION_ENABLED": "false",
+"MEDIA_UPLOADS_ENABLED": "false",
+"RECIPE_SUBMISSIONS_ENABLED": "false"
 ```
 
-Do not enable either flag merely because D1 migrations succeeded.
+D1 reads can therefore operate before any trusted write surface opens.
 
-Core sign-in later requires Worker bindings/secrets for:
+Do not change checked-in defaults to activate production. The guarded workflow creates runner-only temporary configuration for intentional activation.
 
-```text
-DB
-SESSION
-AUTH_PASSWORD_PEPPER
-AUTH_FINGERPRINT_PEPPER
-TURNSTILE_SITE_KEY
-TURNSTILE_SECRET_KEY
-```
+## 9. Staged authentication and write activation
 
-Public registration additionally requires:
+Follow [`D1_AUTH_SETUP.md`](D1_AUTH_SETUP.md) for exact dependencies, secrets, test matrices, health assertions, and rollback.
 
-```text
-AUTH_EMAIL_WEBHOOK_URL
-AUTH_EMAIL_WEBHOOK_TOKEN
-AUTH_REGISTRATION_ENABLED=true
-```
+Required order:
 
-The sender address may be configured as `AUTH_FROM_EMAIL` after its domain is verified.
+1. Apply all seven migrations with every trusted-write flag false.
+2. Configure independent password/fingerprint peppers and Turnstile.
+3. Enable controlled sign-in while registration, media, and recipe writes remain false.
+4. Provision controlled contributor and editor/admin accounts.
+5. Test media upload/moderation and then optionally enable media.
+6. Test initial recipe submission, requested changes, owner revision, snapshots, publication, and rollback.
+7. Optionally enable recipe submissions/revisions while media remains enabled.
+8. Approve legal and verification-email operations.
+9. Enable public registration separately and last.
 
-Follow [D1 Authentication Activation](./D1_AUTH_SETUP.md) for the exact order, webhook contract, security behavior, testing, and rollback procedure. Do not place any password pepper, Turnstile secret, or webhook bearer token in this repository.
+Recipe activation is rejected unless media uploads are also requested. Deployed health verification checks recipe readiness plus optimistic locking, requested changes, contributor revisions, and immutable snapshots.
 
-## 10. Rollback strategy
+## 10. Privacy-safe image derivatives
+
+Cloudflare Images is declared as an optional future integration, not an active public transformation pipeline.
+
+The next recommended phase should:
+
+- keep R2 originals private;
+- normalize orientation;
+- strip EXIF and unnecessary metadata;
+- create bounded responsive WebP/AVIF variants;
+- record derivative lifecycle and source checksum/version;
+- serve derivatives only when the parent D1 asset is uploaded and approved;
+- define regeneration and cleanup behavior;
+- preserve private no-store previews and public cache/ETag guarantees;
+- add health, validator, testing, rollback, and documentation.
+
+Do not enable runtime transformation merely because the `IMAGES` binding exists.
+
+## 11. Rollback
 
 - Worker deployments can be rolled back from Cloudflare deployment history.
-- D1 creates a backup before migrations.
-- A failed migration rolls back while earlier successful migrations remain applied.
+- D1 creates backup protection around migration application according to the platform workflow.
+- A failed migration does not justify manually skipping the authoritative sequence.
 - Public D1 query failures fall back to the versioned catalogue.
 - `wrangler.jsonc` can redeploy the D1-free application.
-- Setting both auth flags to `false` disables account access without taking recipe discovery offline.
+- **Enable D1 and Deploy** returns all checked-in trusted-write flags to false.
+- Disabling authentication invalidates account access.
+- Disabling media closes new intents/uploads but preserves stored assets and approved delivery.
+- Disabling recipe submissions closes first submissions, requested changes, resubmissions, publication, and archival writes while preserving normalized rows, snapshots, audit history, and published reads.
 
-## 11. Production verification
+## 12. Production verification
 
-Before considering D1 authentication ready:
+Before considering any D1 trusted-write surface ready:
 
-1. Confirm all nested migrations are applied.
-2. Confirm `/api/health` reports D1/KV readiness but does not expose secret values.
-3. Confirm Turnstile is restricted to the final hostname.
-4. Confirm verification links are single-use and expire after 30 minutes.
-5. Confirm an unverified account cannot create a session.
-6. Confirm five failed password checks lock an account for 15 minutes.
-7. Confirm logout deletes the KV session and account `auth_version` invalidates older sessions.
-8. Confirm Terms and Privacy text have been approved for the operating company and jurisdiction before registration is enabled.
+1. Confirm all seven nested migrations are applied.
+2. Confirm `/api/health` reports expected bindings/readiness without exposing secrets or private content.
+3. Confirm checked-in flags remain false.
+4. Confirm Turnstile is restricted to approved hostnames.
+5. Confirm verification links are single-use and expire after 30 minutes.
+6. Confirm unverified accounts cannot create sessions.
+7. Confirm lockout and `auth_version` revocation behavior.
+8. Confirm media signature/size/dimension validation and approval-gated delivery.
+9. Confirm another contributor cannot access a recipe revision or media asset.
+10. Confirm stale resubmission cannot partially replace normalized rows.
+11. Confirm publication rechecks approved media in the final write.
+12. Confirm Terms, Privacy, retention, moderation, appeal, and deletion procedures are approved before registration or publishing is enabled.
