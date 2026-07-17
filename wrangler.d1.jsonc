@@ -34,7 +34,8 @@
     "DATA_MODE": "d1",
     "AUTH_ENABLED": "false",
     "AUTH_REGISTRATION_ENABLED": "false",
-    "MEDIA_UPLOADS_ENABLED": "false"
+    "MEDIA_UPLOADS_ENABLED": "false",
+    "RECIPE_SUBMISSIONS_ENABLED": "false"
   },
   "observability": {
     "enabled": true,
