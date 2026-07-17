@@ -1,3 +1,5 @@
+@import "./media.css";
+
 .editor-shell {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 0.38fr);
