@@ -1,0 +1,164 @@
+name: Enable Authentication
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type ENABLE_AUTH to migrate and enable protected accounts
+        required: true
+        type: string
+      enable_registration:
+        description: Open public registration after verification email delivery is configured
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: cloudflare-auth-production
+  cancel-in-progress: false
+
+jobs:
+  enable-auth:
+    if: ${{ inputs.confirmation == 'ENABLE_AUTH' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Verify deployment and authentication configuration
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          AUTH_PASSWORD_PEPPER: ${{ secrets.AUTH_PASSWORD_PEPPER }}
+          AUTH_FINGERPRINT_PEPPER: ${{ secrets.AUTH_FINGERPRINT_PEPPER }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          AUTH_EMAIL_WEBHOOK_TOKEN: ${{ secrets.AUTH_EMAIL_WEBHOOK_TOKEN }}
+          TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
+          AUTH_EMAIL_WEBHOOK_URL: ${{ vars.AUTH_EMAIL_WEBHOOK_URL }}
+          ENABLE_REGISTRATION: ${{ inputs.enable_registration }}
+        run: |
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "CLOUDFLARE_ACCOUNT_ID is not configured"; exit 1; }
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN is not configured"; exit 1; }
+          test -n "$AUTH_PASSWORD_PEPPER" || { echo "AUTH_PASSWORD_PEPPER is not configured"; exit 1; }
+          test -n "$AUTH_FINGERPRINT_PEPPER" || { echo "AUTH_FINGERPRINT_PEPPER is not configured"; exit 1; }
+          test -n "$TURNSTILE_SECRET_KEY" || { echo "TURNSTILE_SECRET_KEY is not configured"; exit 1; }
+          test -n "$TURNSTILE_SITE_KEY" || { echo "TURNSTILE_SITE_KEY environment variable is not configured"; exit 1; }
+          if [ "$ENABLE_REGISTRATION" = "true" ]; then
+            test -n "$AUTH_EMAIL_WEBHOOK_URL" || { echo "AUTH_EMAIL_WEBHOOK_URL environment variable is not configured"; exit 1; }
+            test -n "$AUTH_EMAIL_WEBHOOK_TOKEN" || { echo "AUTH_EMAIL_WEBHOOK_TOKEN is not configured"; exit 1; }
+          fi
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate project and authentication migrations
+        run: npm run validate
+
+      - name: Build D1 Worker
+        run: npm run build:d1
+
+      - name: Prepare ephemeral auth config and encrypted secrets input
+        env:
+          AUTH_PASSWORD_PEPPER: ${{ secrets.AUTH_PASSWORD_PEPPER }}
+          AUTH_FINGERPRINT_PEPPER: ${{ secrets.AUTH_FINGERPRINT_PEPPER }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          AUTH_EMAIL_WEBHOOK_TOKEN: ${{ secrets.AUTH_EMAIL_WEBHOOK_TOKEN }}
+          TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
+          AUTH_EMAIL_WEBHOOK_URL: ${{ vars.AUTH_EMAIL_WEBHOOK_URL }}
+          AUTH_FROM_EMAIL: ${{ vars.AUTH_FROM_EMAIL }}
+          ENABLE_REGISTRATION: ${{ inputs.enable_registration }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+
+          const registrationEnabled = process.env.ENABLE_REGISTRATION === "true";
+          const config = JSON.parse(fs.readFileSync("wrangler.d1.jsonc", "utf8"));
+          config.vars = {
+            ...(config.vars ?? {}),
+            AUTH_ENABLED: "true",
+            AUTH_REGISTRATION_ENABLED: String(registrationEnabled),
+            TURNSTILE_SITE_KEY: process.env.TURNSTILE_SITE_KEY,
+          };
+
+          if (registrationEnabled) {
+            config.vars.AUTH_EMAIL_WEBHOOK_URL = process.env.AUTH_EMAIL_WEBHOOK_URL;
+            if (process.env.AUTH_FROM_EMAIL) config.vars.AUTH_FROM_EMAIL = process.env.AUTH_FROM_EMAIL;
+          } else {
+            delete config.vars.AUTH_EMAIL_WEBHOOK_URL;
+            delete config.vars.AUTH_FROM_EMAIL;
+          }
+
+          const secrets = {
+            AUTH_PASSWORD_PEPPER: process.env.AUTH_PASSWORD_PEPPER,
+            AUTH_FINGERPRINT_PEPPER: process.env.AUTH_FINGERPRINT_PEPPER,
+            TURNSTILE_SECRET_KEY: process.env.TURNSTILE_SECRET_KEY,
+          };
+          if (registrationEnabled) secrets.AUTH_EMAIL_WEBHOOK_TOKEN = process.env.AUTH_EMAIL_WEBHOOK_TOKEN;
+
+          fs.writeFileSync(".wrangler.auth.json", JSON.stringify(config, null, 2), { mode: 0o600 });
+          fs.writeFileSync(".auth-secrets.json", JSON.stringify(secrets), { mode: 0o600 });
+          NODE
+
+      - name: Provision D1 Worker with authentication disabled
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --config wrangler.d1.jsonc
+
+      - name: Apply pending D1 migrations
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: d1 migrations apply DB --remote --config wrangler.d1.jsonc
+
+      - name: Deploy authentication-enabled Worker
+        id: deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          command: deploy --config .wrangler.auth.json --secrets-file .auth-secrets.json
+
+      - name: Verify authentication deployment
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment-url }}
+          EXPECT_REGISTRATION: ${{ inputs.enable_registration }}
+        run: |
+          test -n "$DEPLOYMENT_URL" || { echo "Wrangler did not return a deployment URL"; exit 1; }
+          HEALTH_JSON=$(curl --fail --silent --show-error --retry 5 --retry-delay 3 "$DEPLOYMENT_URL/api/health")
+          echo "$HEALTH_JSON"
+          HEALTH_JSON="$HEALTH_JSON" node --input-type=module -e '
+            const health = JSON.parse(process.env.HEALTH_JSON ?? "{}");
+            const expectRegistration = process.env.EXPECT_REGISTRATION === "true";
+            const failures = [];
+            if (health.ok !== true) failures.push("health.ok is not true");
+            if (health.dataMode !== "d1") failures.push(`unexpected dataMode: ${health.dataMode}`);
+            if (health.authentication?.enabled !== true) failures.push("authentication is not enabled");
+            if (health.authentication?.ready !== true) failures.push("authentication is not ready");
+            if (health.authentication?.registrationEnabled !== expectRegistration) failures.push("registration flag does not match the workflow input");
+            if (expectRegistration && health.authentication?.registrationReady !== true) failures.push("registration is not ready");
+            if (failures.length) {
+              console.error(failures.join("\n"));
+              process.exit(1);
+            }
+          '
+          echo "Authentication deployment completed and verified: $DEPLOYMENT_URL"
+
+      - name: Remove ephemeral secret files
+        if: always()
+        run: rm -f .auth-secrets.json .wrangler.auth.json
