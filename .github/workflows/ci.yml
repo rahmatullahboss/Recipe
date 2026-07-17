@@ -29,5 +29,8 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Validate catalogue and D1 migrations
+        run: npm run validate
+
       - name: Generate Cloudflare types and build Astro Worker
         run: npm run build
