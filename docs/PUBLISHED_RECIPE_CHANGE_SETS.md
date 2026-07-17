@@ -6,14 +6,14 @@ Published-recipe revisions are implemented for the guarded D1 deployment but rem
 "RECIPE_SUBMISSIONS_ENABLED": "false"
 ```
 
-The public D1-free application is unchanged. No real change set was created, submitted, reviewed, promoted, or deployed by this implementation phase.
+The public D1-free application is unchanged. No real change set was created, submitted, restored, reviewed, promoted, or deployed by these implementation phases.
 
 ## Safety objective
 
-A contributor must never edit a live `published` recipe row in place. A proposed update is stored in a separate private change set. Public recipe reads continue to use the existing normalized published row until an editor approves the full proposal and one guarded D1 batch completes.
+Neither contributors nor editors mutate a live `published` recipe while drafting. Proposed content is stored in a separate private change set. Public reads continue to use the existing normalized published row until one guarded D1 approval batch completes.
 
 ```text
-published live recipe
+published live recipe remains public and unchanged
   └─ private change set: draft
        → review
        → changes_requested → review
@@ -21,32 +21,21 @@ published live recipe
        → or cancelled
 ```
 
-A failed validation, stale base, concurrent update, media change, derivative change, or failed D1 statement leaves the live recipe unchanged.
+A failed validation, stale base, concurrent update, invalid historical source, media/derivative change, or failed D1 statement leaves the live recipe unchanged.
 
 ## Migration `0010_published_recipe_change_sets`
 
 The migration adds:
 
-- `recipe_change_sets`
-- `recipe_change_set_events`
-- one-active-change-set-per-recipe partial uniqueness
-- active media reservation uniqueness
-- contributor and editorial queue indexes
-- published-owner triggers
-- cross-table recipe/change-set media reservation triggers
+- `recipe_change_sets`;
+- `recipe_change_set_events`;
+- one-active-change-set-per-recipe partial uniqueness;
+- active media reservation uniqueness;
+- contributor/editorial queue indexes;
+- published-owner triggers;
+- cross-table recipe/change-set media reservation triggers.
 
-Each change set stores:
-
-- recipe and owner identity;
-- creator identity;
-- status and optimistic change-set revision;
-- exact base recipe and content revisions;
-- optional resulting recipe revision;
-- proposed media asset;
-- private baseline JSON;
-- private proposed JSON;
-- contributor and editorial notes;
-- submit, review, promotion, cancellation, create, and update timestamps.
+Each change set stores recipe/owner/creator identity, status, optimistic revision, exact base recipe/content revisions, optional resulting recipe revision, proposed media, private baseline/proposed JSON, notes, and lifecycle timestamps.
 
 Supported statuses:
 
@@ -63,194 +52,118 @@ Only `draft`, `review`, and `changes_requested` are active. D1 allows at most on
 
 ## Contributor workflow
 
-Contributor routes:
+Routes:
 
-- `/account/submissions`
-- `/account/submissions/:id/change-set`
-- `POST /api/recipes/:id/change-set`
+- `/account/submissions/:id/change-set`;
+- `POST /api/recipes/:id/change-set`.
 
-The API supports:
+Contributor actions are `create`, `save`, `submit`, and `cancel`. Mutations require a verified owner session, same-origin, `recipe-published-change-set` purpose CSRF, current session CSRF, limits, canonical validation, and matching optimistic revision.
+
+Creation captures current normalized published content in both baseline and proposal JSON. Save modifies only private JSON/media/note/revision. Submit enters private `review`. A reviewer may request changes and hand the same change set back to the owner. Cancellation releases active media reservation and never changes public content.
+
+## Editor-authored extension
+
+Migration `0011_editor_change_set_origins` lets editor/admin users create an origin-backed private draft from:
 
 ```text
-create
-save
-submit
-cancel
+current live recipe
+historical recipe_revision_snapshots entry
+proposal JSON of an approved change set
+baseline JSON of an approved change set
 ```
 
-Every mutation requires:
+The current live recipe always becomes the new baseline. Historical content becomes only proposed JSON. Immutable origin metadata records source identity/content revision and whether historical media required a safe fallback.
 
-- verified active session;
-- ownership of the published recipe;
-- same-origin request;
-- purpose-bound `recipe-published-change-set` CSRF;
-- current session CSRF;
-- JSON and body-size checks;
-- rate limiting;
-- canonical `RecipeDraft` validation where content is supplied;
-- matching optimistic change-set revision.
+An origin-backed `draft` is editor-controlled. Contributor UI is read-only and contributor API writes return `403`. Editor submission enters the same independent review queue. If changes are requested, contributor control opens through the existing owner correction workflow.
 
-### Create
+Editors can select only eligible media already owned by the recipe contributor. They cannot upload on behalf of the owner. A historical proposal may fall back to current eligible owner media; otherwise it may be saved without media but cannot be submitted.
 
-Creation reads the current normalized published recipe and stores the same complete draft in both `base_content_json` and `content_json`. It captures exact `base_recipe_revision` and `base_content_revision` values.
-
-Creation does not update:
-
-- the live recipe row;
-- live categories;
-- live ingredients;
-- live directions;
-- public media references;
-- publication timestamps.
-
-### Save
-
-A save updates only private change-set JSON, media reservation, contributor note, and change-set revision. The server rechecks that the live recipe is still published and still has the captured base revisions.
-
-### Submit and requested changes
-
-Submission moves `draft` or `changes_requested` to private `review`. Editors can return it to `changes_requested` with a reason of at least ten characters. The contributor then edits and resubmits the same active change set.
-
-### Cancellation
-
-The contributor may cancel an active change set. Cancellation releases its active media reservation and never changes the live recipe.
+See [`EDITOR_RECIPE_CHANGE_SETS.md`](EDITOR_RECIPE_CHANGE_SETS.md).
 
 ## Media reservation and privacy
 
 A proposed image must:
 
 - belong to the recipe owner;
-- be uploaded;
-- have purpose `recipe_hero`;
+- be uploaded for `recipe_hero`;
 - be pending or approved while drafting;
-- have a current ready `recipe-images-v1` derivative job;
-- have all required variants ready;
+- have a ready current `recipe-images-v1` derivative job and complete required variants;
 - not belong to another recipe;
 - not be reserved by another active change set.
 
-Cross-table D1 triggers prevent existing submission/revision code from assigning media that another active change set reserves. The media delete route also refuses deletion while an asset is assigned to a recipe or reserved by an active change set.
+Cross-table D1 triggers prevent existing recipe code from assigning media reserved by another active change set. Media deletion also refuses assigned or reserved assets. Private previews use derivative-only `private, no-store` delivery; original R2 bytes remain unavailable.
 
-Private proposed-image previews use the existing derivative-only media route with `private, no-store`. Original R2 bytes remain unavailable through public or preview delivery.
+## Editorial review
 
-## Editorial workflow
+Routes:
 
-Editorial routes:
+- `/admin/recipe-change-sets` — review queue and proposal launcher;
+- `/admin/recipe-change-sets/:id` — baseline/proposal comparison and audit history;
+- `/admin/recipes/:id/change-set` — editor current/historical private workspace;
+- `POST /api/recipes/:id/editor-change-set` — editor create/restore/save/submit/cancel;
+- `POST /api/recipe-change-sets/:id/editorial` — shared request-changes/approve/cancel operations.
 
-- `/admin/recipe-change-sets`
-- `/admin/recipe-change-sets/:id`
-- `POST /api/recipe-change-sets/:id/editorial`
-
-Actions:
-
-```text
-request_changes
-approve
-cancel
-```
-
-Every editorial mutation requires:
-
-- verified active session;
-- `editor` or `admin` role;
-- same-origin request;
-- purpose-bound `recipe-change-set-editorial` CSRF;
-- current session CSRF;
-- matching optimistic change-set revision.
-
-The detail page compares private baseline and proposed scalar fields, categories, ingredients, directions, media, contributor note, base/live revisions, and audit history.
+Editorial mutations require verified editor/admin session, same-origin, purpose/session CSRF, matching optimistic revision, and private no-store responses. The review detail compares baseline and proposed scalars, categories, ingredients, directions, media, notes, live/base revisions, origin, and audit history.
 
 ## Atomic approval and promotion
 
-Approval requires the change set to remain in `review`. Before building the batch, the server revalidates:
+Approval requires `review` and revalidates:
 
-- proposed JSON through the canonical draft validator;
+- canonical proposed JSON;
 - live status remains `published`;
-- live recipe revision equals `base_recipe_revision`;
-- live content revision equals `base_content_revision`;
-- all category slugs exist;
-- proposed media belongs to the contributor;
-- proposed media is uploaded and approved;
-- media source checksum is current;
-- derivative policy is `recipe-images-v1`;
-- required JPEG/WebP variants are ready;
-- media is not assigned or reserved elsewhere.
+- exact base recipe and content revisions;
+- category existence;
+- proposed media owner, upload, approval, checksum, policy, and required variants;
+- no conflicting media assignment/reservation.
 
-The final D1 batch:
+One D1 batch:
 
-1. conditionally acquires a unique `revision_write_token` while replacing live scalar fields and media;
+1. conditionally acquires a unique `revision_write_token` while replacing live scalar/media fields;
 2. increments live `revision` and `content_revision` while keeping status `published`;
-3. clears any old publication schedule;
-4. guardedly deletes and reinserts categories;
-5. guardedly deletes and reinserts ingredients;
-6. guardedly deletes and reinserts directions;
-7. conditionally marks the change set `approved` and records the resulting recipe revision;
+3. clears obsolete scheduling state;
+4. guardedly replaces categories;
+5. guardedly replaces ingredients;
+6. guardedly replaces directions;
+7. marks the change set `approved` and records resulting revision;
 8. writes an immutable approval event;
-9. clears the temporary write token.
+9. clears the temporary token.
 
-Every relational delete and insert requires the same token. A stale or concurrent request cannot partially delete normalized content. D1 batch failure rolls back the complete operation.
+Every relational delete/insert requires the same token. A stale/concurrent request cannot partially remove normalized content. D1 batch failure rolls back the complete operation. Contributor- and editor-authored proposals share this exact approval service.
 
-## Audit events
+## Audit and health
 
-`recipe_change_set_events` records:
+`recipe_change_set_events` records create, save, submit, request changes, cancel, and approve actions with actor, statuses, revisions, reason, and timestamp. `recipe_change_set_origins` records immutable editor source metadata.
 
-```text
-create
-save
-submit
-request_changes
-cancel
-approve
-```
+`/api/health` reports non-secret capabilities for live-row isolation, one-active guard, private snapshots, optimistic/base guards, media reservation, approval revalidation, atomic promotion, audit events, editor-authored proposals, historical restoration, immutable origins, contributor draft-lock, media fallback, and shared approval.
 
-Events include actor, previous/next status, change-set revision, base recipe revision, optional resulting recipe revision, reason, and timestamp.
+The guarded authentication workflow refuses recipe-write activation if any capability is missing.
 
-Private JSON is not exposed through public recipe queries or public APIs.
+## Acceptance matrix
 
-## Health and activation checks
-
-`/api/health` reports non-secret booleans for:
-
-- live published row isolation;
-- one active change set per recipe;
-- private baseline/proposed snapshots;
-- optimistic change-set revisions;
-- base recipe/content revision guard;
-- media reservation;
-- approval-time media and derivative revalidation;
-- atomic relational promotion;
-- immutable audit events.
-
-The guarded authentication workflow refuses recipe-write activation if any of these capabilities is missing.
-
-## Test matrix
-
-1. Anonymous create/save/submit/cancel returns 401.
-2. Invalid origin or either CSRF value returns 403.
-3. Another contributor cannot create or open a change set for the recipe.
-4. A non-published recipe cannot receive an active published change set.
-5. Concurrent creation produces at most one active change set.
-6. Creation stores private baseline/proposed JSON and leaves the live recipe unchanged.
-7. Invalid proposed content returns 422 and leaves both live and private server content unchanged.
-8. A stale change-set revision returns 409.
-9. A changed live recipe revision/content revision returns 409.
-10. Unknown categories are rejected.
-11. Foreign, deleted, rejected, quarantined, assigned, or separately reserved media is rejected.
-12. Media reserved by an active change set cannot be deleted or assigned to another recipe.
-13. Private save changes only change-set state.
-14. Submission enters private `review` and remains absent from public recipe output.
-15. Request changes requires an adequate reason and returns the same change set to the owner.
-16. Approval is blocked while proposed media is pending or derivatives are incomplete.
-17. Approval with a stale live base returns conflict without changing live rows.
-18. A concurrent media moderation/source/checksum/derivative change returns conflict.
-19. Successful approval increments live recipe/content revisions and replaces all normalized content atomically.
-20. Successful approval keeps recipe status `published` and clears old scheduling state.
-21. A failed statement cannot partially delete categories, ingredients, or directions.
-22. Cancellation releases active uniqueness/reservation and leaves public content unchanged.
-23. Private pages and APIs return `private, no-store`; robots do not index account/admin/API paths.
-24. Disabling recipe submissions closes all change-set writes while preserving stored history and published reads.
+1. Anonymous/private-route access fails appropriately.
+2. Non-editor editor-authored operations fail.
+3. Invalid origin or CSRF fails.
+4. Only the recipe owner can author contributor proposals.
+5. Editor proposal uses current live content as exact baseline.
+6. Historical source affects only private proposal JSON.
+7. Concurrent creation produces at most one active change set.
+8. Contributor cannot modify an editor-controlled draft.
+9. Editor cannot modify a contributor-controlled draft.
+10. Invalid proposed content/category/media creates no partial state.
+11. Stale change-set or live base revisions return conflict.
+12. Foreign/deleted/rejected/quarantined/assigned/reserved media is rejected.
+13. Historical media fallback is recorded or submission remains blocked.
+14. Save changes only private state.
+15. Submission remains absent from public output.
+16. Requested changes transfer editing control to the contributor.
+17. Approval is blocked by pending media or incomplete/stale derivatives.
+18. Successful approval keeps `published`, increments live revisions, and atomically replaces normalized content.
+19. Failed statements cannot partially replace categories/ingredients/directions.
+20. Cancellation releases active uniqueness/reservation and leaves public content unchanged.
+21. Disabling recipe submissions closes all writes while preserving rows/history/public reads.
 
 ## Rollback and conflicts
 
-Disable recipe writes by rerunning the guarded authentication workflow with `enable_recipe_submissions=false`, or restore the checked-in fail-closed D1 configuration. This closes create/save/submit/review/approve/cancel operations without deleting stored rows or audit events.
+Redeploy checked-in false flags or run guarded activation with `enable_recipe_submissions=false`. This closes create/restore/save/submit/review/approve/cancel operations without deleting stored rows, origins, or events.
 
-A stale-base change set is intentionally not auto-merged. It should be cancelled and recreated from the latest published version. Automatic three-way merge, editor-authored changes, and restoring historical snapshots into a new change set remain future phases.
+A stale-base proposal is intentionally not auto-merged. It should be cancelled and recreated from the latest published version. Rich three-way conflict comparison/merge assistance remains a future phase and must not weaken optimistic rejection.
