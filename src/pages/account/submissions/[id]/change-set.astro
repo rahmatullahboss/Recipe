@@ -1,0 +1,259 @@
+---
+import BaseLayout from "../../../../layouts/BaseLayout.astro";
+import {
+  CSRF_COOKIE,
+  createCsrfToken,
+  createRandomToken,
+  getCsrfCookieOptions,
+} from "../../../../lib/auth";
+import { getContributorPublishedChangeSetEditor } from "../../../../lib/recipe-change-sets";
+import { listCategories } from "../../../../lib/db";
+import { markets } from "../../../../lib/market";
+import { getMediaReadiness } from "../../../../lib/media";
+import { getMediaRuntimeStatus } from "../../../../lib/media-runtime";
+import { supportedRecipeLanguages } from "../../../../lib/recipe-draft";
+import { getRecipeSubmissionReadiness } from "../../../../lib/recipe-submissions";
+
+const recipeId = Astro.params.id ?? "";
+if (!Astro.locals.user || !Astro.locals.session) {
+  return Astro.redirect(`/login?next=${encodeURIComponent(`/account/submissions/${recipeId}/change-set`)}`, 302);
+}
+
+const validId = /^recipe_[0-9a-f-]{36}$/i.test(recipeId);
+const submissionReadiness = getRecipeSubmissionReadiness();
+const editor = validId && submissionReadiness.database
+  ? await getContributorPublishedChangeSetEditor(Astro.locals.user.id, recipeId)
+  : null;
+if (validId && submissionReadiness.database && !editor) Astro.response.status = 404;
+
+const categories = await listCategories(100);
+const mediaReadiness = getMediaReadiness();
+const mediaRuntime = getMediaRuntimeStatus();
+const hasVerifiedSession = Boolean(Astro.locals.authReady && Astro.locals.user && Astro.locals.session);
+const changeSetStatus = editor?.changeSet?.status ?? null;
+const canCreate = Boolean(editor && !editor.changeSet && hasVerifiedSession && submissionReadiness.ready);
+const canEdit = Boolean(
+  editor?.changeSet
+  && (changeSetStatus === "draft" || changeSetStatus === "changes_requested")
+  && hasVerifiedSession
+  && submissionReadiness.ready,
+);
+const canCancel = Boolean(editor?.changeSet && hasVerifiedSession && submissionReadiness.ready);
+const canUploadMedia = Boolean(canEdit && mediaRuntime.uploadsEnabled && mediaReadiness.ready);
+
+let nonce = Astro.cookies.get(CSRF_COOKIE)?.value;
+if ((canCreate || canEdit || canCancel || canUploadMedia) && !nonce) {
+  nonce = createRandomToken(18);
+  Astro.cookies.set(CSRF_COOKIE, nonce, getCsrfCookieOptions(Astro.request));
+}
+const changeSetCsrf = canCreate || canEdit || canCancel
+  ? await createCsrfToken("recipe-published-change-set", nonce)
+  : "";
+const mediaCsrf = canUploadMedia ? await createCsrfToken("media-intent", nonce) : "";
+const sessionCsrf = Astro.locals.session.csrfToken;
+const draft = editor?.draft;
+const languageLabels: Record<string, string> = {
+  en: "English",
+  fr: "French",
+  de: "German",
+  sv: "Swedish",
+  nl: "Dutch",
+};
+---
+
+<BaseLayout
+  title={editor ? `Update ${editor.recipe.title} — Ozzyl Recipes` : "Published Recipe Update — Ozzyl Recipes"}
+  description="Prepare a private change set without changing the live published recipe."
+  robots="noindex,nofollow"
+>
+  <section class="section section--soft">
+    <div class="container">
+      <p class="eyebrow">Published recipe update</p>
+      <h1 class="section-title">{editor ? editor.recipe.title : "Published recipe update unavailable"}</h1>
+      {editor && (
+        <p class="section-copy">
+          Live recipe revision {editor.recipe.revision} · content revision {editor.recipe.contentRevision}. The public recipe stays unchanged until editorial approval completes atomically.
+        </p>
+      )}
+    </div>
+  </section>
+
+  <section
+    class="section"
+    data-published-change-set-editor
+    data-recipe-id={editor?.recipe.id ?? ""}
+    data-change-set-id={editor?.changeSet?.id ?? ""}
+    data-change-set-revision={editor?.changeSet?.revision ?? ""}
+    data-change-set-status={editor?.changeSet?.status ?? ""}
+    data-can-create={canCreate ? "true" : "false"}
+    data-can-edit={canEdit ? "true" : "false"}
+    data-can-cancel={canCancel ? "true" : "false"}
+    data-storage-key={editor?.changeSet ? `ozzyl:published-change-set:${editor.changeSet.id}:v1` : ""}
+    data-csrf={changeSetCsrf}
+    data-session-csrf={sessionCsrf}
+  >
+    <div class="container">
+      {!submissionReadiness.database ? (
+        <div class="auth-alert"><strong>D1 recipe storage is unavailable.</strong></div>
+      ) : !editor || !draft ? (
+        <div class="moderation-empty">
+          <h2>This published recipe cannot be revised here</h2>
+          <p>Only the owning contributor can open a private update for a published recipe.</p>
+          <a class="button" href="/account/submissions">Back to submissions</a>
+        </div>
+      ) : !editor.changeSet ? (
+        <div class="editor-section">
+          <p class="eyebrow">No active private update</p>
+          <h2>Start from the current published version</h2>
+          <p>A private baseline and proposed copy will be stored in D1. The public page and normalized live rows will not change while you edit or while editors review the proposal.</p>
+          <div class="editor-actions">
+            <button class="button" type="button" data-start-change-set disabled={!canCreate}>Start private update</button>
+            <a class="recipe-tool-button" href={`/recipes/${editor.recipe.slug}`}>View live recipe</a>
+          </div>
+          {!canCreate && <div class="validation-errors"><p>Published updates remain closed until the complete guarded recipe pipeline is ready.</p></div>}
+          <p class="moderation-result" data-change-set-result aria-live="polite"></p>
+        </div>
+      ) : changeSetStatus === "review" ? (
+        <div class="editor-shell">
+          <article class="editor-section">
+            <p class="eyebrow">Under editorial review</p>
+            <h2>{draft.title}</h2>
+            <p><strong>{draft.summary}</strong></p>
+            <p>Your proposed update is private. The live recipe remains available at its existing revision until an editor approves the full change set.</p>
+            <dl class="moderation-meta">
+              <div><dt>Change-set revision</dt><dd>{editor.changeSet.revision}</dd></div>
+              <div><dt>Base recipe revision</dt><dd>{editor.changeSet.baseRecipeRevision}</dd></div>
+              <div><dt>Media</dt><dd>{editor.media?.moderationStatus || "missing"}</dd></div>
+              <div><dt>Submitted</dt><dd>{editor.changeSet.submittedAt ? new Date(editor.changeSet.submittedAt).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" }) : "pending"}</dd></div>
+            </dl>
+            {editor.changeSet.contributorNote && <p><strong>Contributor note:</strong> {editor.changeSet.contributorNote}</p>}
+            <div class="editor-actions">
+              <a class="button button--ghost" href={`/recipes/${editor.recipe.slug}`}>View live recipe</a>
+              <button class="recipe-tool-button" type="button" data-cancel-change-set disabled={!canCancel}>Withdraw proposal</button>
+            </div>
+            <p class="moderation-result" data-change-set-result aria-live="polite"></p>
+          </article>
+          <aside class="editor-preview">
+            <div class="editor-preview__image">
+              {editor.media ? <img src={editor.media.previewUrl} alt={editor.media.altText || "Private proposed recipe image"} /> : <span>Private image unavailable</span>}
+            </div>
+            <p class="eyebrow">Private proposal</p>
+            <h2>{draft.title}</h2>
+            <p>{draft.summary}</p>
+            <p class="editor-preview__meta">{draft.countryCode} · {draft.prepMinutes + draft.cookMinutes} min · {draft.servings} servings · {draft.difficulty}</p>
+          </aside>
+        </div>
+      ) : (
+        <div class="editor-shell">
+          <form class="editor-form" novalidate>
+            <input name="mediaAssetId" type="hidden" value={draft.mediaAssetId ?? ""} data-media-asset-id />
+
+            {changeSetStatus === "changes_requested" && (
+              <div class="auth-alert auth-alert--error" role="alert">
+                <strong>Editorial changes requested</strong>
+                <p>{editor.changeSet.editorialReason || "Review the editorial feedback before resubmitting this private update."}</p>
+              </div>
+            )}
+
+            <div class="editor-section">
+              <div class="editor-section__heading">
+                <div><h2>Recipe identity</h2><p>Edit the private proposal. The live recipe remains unchanged.</p></div>
+                <span class="editor-status" data-change-set-status>Private draft loaded.</span>
+              </div>
+              <div class="editor-grid">
+                <label class="editor-field editor-field--full"><span>Recipe title</span><input name="title" type="text" maxlength="120" value={draft.title} /></label>
+                <label class="editor-field editor-field--full"><span>Short summary</span><textarea name="summary" maxlength="240">{draft.summary}</textarea></label>
+                <label class="editor-field editor-field--full"><span>Full introduction</span><textarea name="description" maxlength="5000">{draft.description}</textarea></label>
+              </div>
+            </div>
+
+            <div class="editor-section" data-media-uploader data-media-enabled={canUploadMedia ? "true" : "false"}>
+              <div class="editor-section__heading">
+                <div><h2>Proposed hero image</h2><p>Keep the approved live image or upload a private replacement for separate moderation.</p></div>
+                <span class="editor-status" data-media-status>{editor.media ? `Attached · ${editor.media.moderationStatus}` : "Image required"}</span>
+              </div>
+              {canUploadMedia ? (
+                <div class="media-upload-grid">
+                  <input type="hidden" value={mediaCsrf} data-media-csrf />
+                  <input type="hidden" value={sessionCsrf} data-media-session-csrf />
+                  <label class="editor-field editor-field--full"><span>Replacement JPEG, PNG, or WebP</span><input data-media-file type="file" accept="image/jpeg,image/png,image/webp" /><small class="editor-help">Maximum 8 MB. Minimum 320 × 240 pixels.</small></label>
+                  <label class="editor-field editor-field--full"><span>Alternative text</span><input data-media-alt type="text" maxlength="240" value={editor.media?.altText ?? ""} placeholder="Describe the visible food and important context." /></label>
+                  <div class="editor-actions editor-actions--compact">
+                    <button class="button" type="button" data-upload-media>Upload replacement</button>
+                    <button class="recipe-tool-button" type="button" data-clear-media>Detach image</button>
+                  </div>
+                </div>
+              ) : (
+                <div class="auth-help">Media replacement remains closed until authentication, D1, R2, Images, and uploads are ready.</div>
+              )}
+            </div>
+
+            <div class="editor-section">
+              <div class="editor-section__heading"><div><h2>Market and classification</h2><p>Confirm market, language, measurements, and taxonomy.</p></div></div>
+              <div class="editor-grid editor-grid--four">
+                <label class="editor-field"><span>Country or market</span><select name="countryCode">{markets.map((option) => <option value={option.code} selected={option.code === draft.countryCode}>{option.name}</option>)}</select></label>
+                <label class="editor-field"><span>Language</span><select name="languageCode">{supportedRecipeLanguages.map((code) => <option value={code} selected={code === draft.languageCode}>{languageLabels[code]}</option>)}</select></label>
+                <label class="editor-field"><span>Measurements</span><select name="measurementSystem"><option value="us" selected={draft.measurementSystem === "us"}>US customary</option><option value="metric" selected={draft.measurementSystem === "metric"}>Metric</option></select></label>
+                <label class="editor-field"><span>Difficulty</span><select name="difficulty"><option value="easy" selected={draft.difficulty === "easy"}>Easy</option><option value="medium" selected={draft.difficulty === "medium"}>Medium</option><option value="hard" selected={draft.difficulty === "hard"}>Hard</option></select></label>
+              </div>
+              <div class="recipe-control-group" style="margin-top:20px">
+                <span class="recipe-control-label">Categories and cuisines</span>
+                <div class="category-checks">{categories.map((category) => <label class="category-check"><input type="checkbox" name="categories" value={category.slug} checked={draft.categories.includes(category.slug)} /><span>{category.name}</span></label>)}</div>
+              </div>
+            </div>
+
+            <div class="editor-section">
+              <div class="editor-section__heading"><div><h2>Timing and yield</h2><p>Use realistic preparation and cooking times.</p></div></div>
+              <div class="editor-grid editor-grid--four">
+                <label class="editor-field"><span>Prep minutes</span><input name="prepMinutes" type="number" min="0" max="1440" step="1" value={draft.prepMinutes} /></label>
+                <label class="editor-field"><span>Cook minutes</span><input name="cookMinutes" type="number" min="0" max="4320" step="1" value={draft.cookMinutes} /></label>
+                <label class="editor-field"><span>Servings</span><input name="servings" type="number" min="1" max="200" step="1" value={draft.servings} /></label>
+              </div>
+            </div>
+
+            <div class="editor-section">
+              <div class="editor-section__heading"><div><h2>Ingredients</h2><p>The complete proposed ingredient list replaces the live list only after approval.</p></div><button class="recipe-tool-button" type="button" data-add-ingredient>Add ingredient</button></div>
+              <div class="repeating-list" data-ingredient-rows>{draft.ingredients.map((ingredient) => <div class="ingredient-row" data-ingredient-row><input name="ingredient-item" type="text" maxlength="120" value={ingredient.item} aria-label="Ingredient name" /><input name="ingredient-amount" type="text" maxlength="32" value={ingredient.amount} aria-label="Ingredient amount" /><input name="ingredient-unit" type="text" maxlength="32" value={ingredient.unit} aria-label="Ingredient unit" /><input name="ingredient-note" type="text" maxlength="160" value={ingredient.note} aria-label="Ingredient note" /><button class="remove-row-button" type="button" data-remove-ingredient aria-label="Remove ingredient">×</button></div>)}</div>
+            </div>
+
+            <div class="editor-section">
+              <div class="editor-section__heading"><div><h2>Directions</h2><p>The complete private direction list is reviewed as one atomic change set.</p></div><button class="recipe-tool-button" type="button" data-add-step>Add step</button></div>
+              <div class="repeating-list" data-step-rows>{draft.steps.map((step) => <div class="step-row" data-step-row><textarea name="step-instruction" maxlength="1000" aria-label="Step instruction">{step.instruction}</textarea><input name="step-timer" type="number" min="0" max="1440" step="1" value={step.timerMinutes ?? ""} aria-label="Optional timer in minutes" /><button class="remove-row-button" type="button" data-remove-step aria-label="Remove step">×</button></div>)}</div>
+            </div>
+
+            <div class="validation-errors" data-validation-errors hidden></div>
+
+            <div class="editor-section">
+              <div class="editor-section__heading"><div><h2>Save or submit</h2><p>Saving updates only the private change set. Submission sends it to the editor queue.</p></div></div>
+              <label class="editor-field editor-field--full"><span>Contributor note</span><textarea data-contributor-note maxlength="1000" placeholder="Explain the proposed update and why it improves the recipe.">{editor.changeSet.contributorNote ?? ""}</textarea></label>
+              <div class="editor-actions">
+                <button class="recipe-tool-button" type="button" data-save-change-set disabled={!canEdit}>Save private draft</button>
+                <button class="button" type="button" data-submit-change-set disabled={!canEdit}>Submit for review</button>
+                <button class="recipe-tool-button" type="button" data-cancel-change-set disabled={!canCancel}>Cancel change set</button>
+                <button class="recipe-tool-button" type="button" data-discard-local>Discard local edits</button>
+              </div>
+              <p class="moderation-result" data-change-set-result aria-live="polite"></p>
+            </div>
+          </form>
+
+          <aside class="editor-preview" aria-label="Published recipe update preview">
+            <div class="editor-preview__image">
+              {editor.media ? <img data-preview-image src={editor.media.previewUrl} alt={editor.media.altText || "Private proposed recipe image"} /> : <img data-preview-image hidden alt="" />}
+              <span data-preview-image-placeholder hidden={Boolean(editor.media)}>Private photo preview</span>
+            </div>
+            <p class="eyebrow">Private proposal</p>
+            <h2 data-preview-title>{draft.title}</h2>
+            <p data-preview-summary>{draft.summary}</p>
+            <p class="editor-preview__meta" data-preview-meta>{draft.countryCode} · {draft.prepMinutes + draft.cookMinutes} min · {draft.servings} servings · {draft.difficulty}</p>
+            <p class="conversion-note" data-preview-media-status>{editor.media ? `Attached image is ${editor.media.moderationStatus}.` : "An eligible image is required."}</p>
+            <a class="recipe-tool-button" href={`/recipes/${editor.recipe.slug}`}>Compare live recipe</a>
+          </aside>
+
+          <template data-ingredient-template><div class="ingredient-row" data-ingredient-row><input name="ingredient-item" type="text" maxlength="120" placeholder="Ingredient" aria-label="Ingredient name" /><input name="ingredient-amount" type="text" maxlength="32" placeholder="Amount" aria-label="Ingredient amount" /><input name="ingredient-unit" type="text" maxlength="32" placeholder="Unit" aria-label="Ingredient unit" /><input name="ingredient-note" type="text" maxlength="160" placeholder="Optional note" aria-label="Ingredient note" /><button class="remove-row-button" type="button" data-remove-ingredient aria-label="Remove ingredient">×</button></div></template>
+          <template data-step-template><div class="step-row" data-step-row><textarea name="step-instruction" maxlength="1000" placeholder="Describe this step clearly." aria-label="Step instruction"></textarea><input name="step-timer" type="number" min="0" max="1440" step="1" placeholder="Timer min" aria-label="Optional timer in minutes" /><button class="remove-row-button" type="button" data-remove-step aria-label="Remove step">×</button></div></template>
+        </div>
+      )}
+    </div>
+  </section>
+  <script src="/scripts/published-change-set-editor.js" defer></script>
+</BaseLayout>
