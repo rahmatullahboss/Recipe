@@ -8,6 +8,7 @@ import { markets } from "../../lib/market";
 import { getMediaReadiness } from "../../lib/media";
 import { getMediaDerivativeReadiness } from "../../lib/media-derivatives";
 import { getMediaRuntimeStatus } from "../../lib/media-runtime";
+import { getRecipeChangeSetConflictReadiness } from "../../lib/recipe-change-set-conflicts";
 import { getPublishedRecipeChangeSetReadiness } from "../../lib/recipe-change-sets";
 import { getRecipePublicationWorkflowReadiness } from "../../lib/recipe-publication";
 import { getRecipeSubmissionReadiness } from "../../lib/recipe-submissions";
@@ -31,6 +32,7 @@ export const GET: APIRoute = async () => {
   const publicationWorkflow = getRecipePublicationWorkflowReadiness();
   const publishedChangeSets = getPublishedRecipeChangeSetReadiness();
   const editorChangeSets = getEditorRecipeChangeSetReadiness();
+  const conflictAssistance = getRecipeChangeSetConflictReadiness();
 
   return Response.json(
     {
@@ -124,6 +126,13 @@ export const GET: APIRoute = async () => {
         editorChangeSetCurrentLiveBaseline: editorChangeSets.currentLiveBaseline,
         historicalSnapshotMediaFallback: editorChangeSets.snapshotMediaFallback,
         editorChangeSetSharedAtomicApproval: editorChangeSets.sharedAtomicApproval,
+        changeSetThreeWayComparison: conflictAssistance.threeWayComparison,
+        changeSetAtomicCollectionUnits: conflictAssistance.atomicCollectionUnits,
+        changeSetExplicitConflictChoices: conflictAssistance.explicitConflictChoices,
+        changeSetPrivateRebaseOnly: conflictAssistance.privateRebaseOnly,
+        changeSetImmutableRebaseAudit: conflictAssistance.immutableRebaseAudit,
+        changeSetStaleApprovalBlocked: conflictAssistance.staleApprovalStillBlocked,
+        changeSetReviewerConflictHandoff: conflictAssistance.reviewerConflictHandoff,
       },
       timestamp: new Date().toISOString(),
     },
