@@ -35,35 +35,16 @@ type Actor = { id: string; role: string };
 type IngredientRow = { item: string; amount: string | null; unit: string | null; note: string | null };
 type StepRow = { instruction: string; timer_seconds: number | null };
 type CategorySlugRow = { slug: string };
-type LiveRecipeRow = {
-  id: string;
-  author_id: string;
-  title: string;
-  summary: string;
-  description: string | null;
-  media_asset_id: string | null;
-  country_code: string;
-  language_code: string;
-  measurement_system: "us" | "metric";
-  prep_minutes: number;
-  cook_minutes: number;
-  servings: number;
-  difficulty: "easy" | "medium" | "hard";
-  status: string;
-  revision: number;
-  content_revision: number;
-  slug: string;
-};
 type ConflictRow = {
-  id: string;
+  change_set_id: string;
   recipe_id: string;
   owner_id: string;
   created_by: string;
-  status: string;
-  revision: number;
+  change_set_status: string;
+  change_set_revision: number;
   base_recipe_revision: number;
   base_content_revision: number;
-  media_asset_id: string | null;
+  proposed_media_asset_id: string | null;
   base_content_json: string;
   content_json: string;
   contributor_note: string | null;
@@ -71,7 +52,24 @@ type ConflictRow = {
   source_type: string | null;
   owner_name: string;
   creator_name: string;
-} & LiveRecipeRow;
+  live_recipe_id: string;
+  live_author_id: string;
+  live_title: string;
+  live_summary: string;
+  live_description: string | null;
+  live_media_asset_id: string | null;
+  live_country_code: string;
+  live_language_code: string;
+  live_measurement_system: "us" | "metric";
+  live_prep_minutes: number;
+  live_cook_minutes: number;
+  live_servings: number;
+  live_difficulty: "easy" | "medium" | "hard";
+  live_status: string;
+  live_revision: number;
+  live_content_revision: number;
+  live_slug: string;
+};
 
 const bindings = env as unknown as Bindings;
 const UNIT_ORDER: RecipeConflictUnitKey[] = [
@@ -145,19 +143,19 @@ async function loadRecipeContent(database: D1Database, recipeId: string) {
   };
 }
 
-function toDraft(recipe: LiveRecipeRow, content: Awaited<ReturnType<typeof loadRecipeContent>>): RecipeDraft {
+function toLiveDraft(row: ConflictRow, content: Awaited<ReturnType<typeof loadRecipeContent>>): RecipeDraft {
   return {
-    title: recipe.title,
-    summary: recipe.summary,
-    description: recipe.description ?? "",
-    mediaAssetId: recipe.media_asset_id,
-    countryCode: recipe.country_code,
-    languageCode: recipe.language_code as RecipeDraft["languageCode"],
-    measurementSystem: recipe.measurement_system,
-    prepMinutes: recipe.prep_minutes,
-    cookMinutes: recipe.cook_minutes,
-    servings: recipe.servings,
-    difficulty: recipe.difficulty,
+    title: row.live_title,
+    summary: row.live_summary,
+    description: row.live_description ?? "",
+    mediaAssetId: row.live_media_asset_id,
+    countryCode: row.live_country_code,
+    languageCode: row.live_language_code as RecipeDraft["languageCode"],
+    measurementSystem: row.live_measurement_system,
+    prepMinutes: row.live_prep_minutes,
+    cookMinutes: row.live_cook_minutes,
+    servings: row.live_servings,
+    difficulty: row.live_difficulty,
     categories: content.categories.map((item) => item.slug),
     ingredients: content.ingredients.map((item) => ({
       item: item.item,
@@ -232,7 +230,7 @@ function mergeThreeWayDraft(
   comparison: ReturnType<typeof buildRecipeChangeSetThreeWay>,
   resolutions: Partial<Record<RecipeConflictUnitKey, RecipeConflictChoice>>,
 ): RecipeDraft {
-  const merged = cloneValue(live) as Record<string, unknown>;
+  const merged = cloneValue(live) as unknown as Record<string, unknown>;
   for (const unit of comparison.units) {
     if (unit.state === "proposal_only") merged[unit.key] = cloneValue(proposed[unit.key]);
     else if (unit.state === "conflict") {
@@ -254,14 +252,20 @@ function mergeThreeWayDraft(
 
 async function loadConflictRow(database: D1Database, changeSetId: string): Promise<ConflictRow | null> {
   return database.prepare(
-    `SELECT cs.id, cs.recipe_id, cs.owner_id, cs.created_by, cs.status, cs.revision,
-            cs.base_recipe_revision, cs.base_content_revision, cs.media_asset_id,
+    `SELECT cs.id AS change_set_id, cs.recipe_id, cs.owner_id, cs.created_by,
+            cs.status AS change_set_status, cs.revision AS change_set_revision,
+            cs.base_recipe_revision, cs.base_content_revision,
+            cs.media_asset_id AS proposed_media_asset_id,
             cs.base_content_json, cs.content_json, cs.contributor_note, cs.editorial_reason,
             o.source_type, owner.display_name AS owner_name, creator.display_name AS creator_name,
-            r.id, r.author_id, r.title, r.summary, r.description, r.media_asset_id,
-            r.country_code, r.language_code, r.measurement_system, r.prep_minutes,
-            r.cook_minutes, r.servings, r.difficulty, r.status, r.revision,
-            r.content_revision, r.slug
+            r.id AS live_recipe_id, r.author_id AS live_author_id,
+            r.title AS live_title, r.summary AS live_summary, r.description AS live_description,
+            r.media_asset_id AS live_media_asset_id, r.country_code AS live_country_code,
+            r.language_code AS live_language_code, r.measurement_system AS live_measurement_system,
+            r.prep_minutes AS live_prep_minutes, r.cook_minutes AS live_cook_minutes,
+            r.servings AS live_servings, r.difficulty AS live_difficulty,
+            r.status AS live_status, r.revision AS live_revision,
+            r.content_revision AS live_content_revision, r.slug AS live_slug
      FROM recipe_change_sets cs
      JOIN recipes r ON r.id = cs.recipe_id
      JOIN users owner ON owner.id = cs.owner_id
@@ -276,8 +280,8 @@ function canView(row: ConflictRow, actor: Actor): boolean {
 }
 
 function controlMode(row: ConflictRow, actor: Actor): "contributor" | "editor" | null {
-  if (row.status === "changes_requested" && row.owner_id === actor.id) return "contributor";
-  if (row.status !== "draft") return null;
+  if (row.change_set_status === "changes_requested" && row.owner_id === actor.id) return "contributor";
+  if (row.change_set_status !== "draft") return null;
   if (!row.source_type && row.owner_id === actor.id) return "contributor";
   if (row.source_type && (actor.role === "editor" || actor.role === "admin")) return "editor";
   return null;
@@ -291,7 +295,7 @@ export async function getRecipeChangeSetConflictContext(changeSetId: string, act
   const content = await loadRecipeContent(database, row.recipe_id);
   const baseline = parseDraftJson(row.base_content_json, "Stored baseline");
   const proposed = parseDraftJson(row.content_json, "Stored proposal");
-  const live = toDraft(row, content);
+  const live = toLiveDraft(row, content);
   const comparison = buildRecipeChangeSetThreeWay(baseline, live, proposed);
   const rebases = await database.prepare(
     `SELECT rb.id, rb.actor_id, rb.previous_change_set_revision, rb.resulting_change_set_revision,
@@ -302,30 +306,26 @@ export async function getRecipeChangeSetConflictContext(changeSetId: string, act
      FROM recipe_change_set_rebases rb JOIN users u ON u.id = rb.actor_id
      WHERE rb.change_set_id = ? ORDER BY rb.created_at DESC`,
   ).bind(changeSetId).all();
-  const stale = row.status !== "published"
-    ? row.revision !== row.base_recipe_revision || row.content_revision !== row.base_content_revision || row.status !== "published"
-    : false;
-  const livePublished = row.status === "published";
-  const baseStale = !livePublished
-    || row.revision !== row.base_recipe_revision
-    || row.content_revision !== row.base_content_revision;
+  const baseStale = row.live_status !== "published"
+    || row.live_revision !== row.base_recipe_revision
+    || row.live_content_revision !== row.base_content_revision;
   return {
     changeSet: {
-      id: row.id,
+      id: row.change_set_id,
       recipeId: row.recipe_id,
       ownerId: row.owner_id,
       ownerName: row.owner_name,
       creatorName: row.creator_name,
       sourceType: row.source_type,
-      status: row.status,
-      revision: row.revision,
+      status: row.change_set_status,
+      revision: row.change_set_revision,
       baseRecipeRevision: row.base_recipe_revision,
       baseContentRevision: row.base_content_revision,
-      liveRecipeRevision: row.revision,
-      liveContentRevision: row.content_revision,
-      liveStatus: row.status,
-      slug: row.slug,
-      title: row.title,
+      liveRecipeRevision: row.live_revision,
+      liveContentRevision: row.live_content_revision,
+      liveStatus: row.live_status,
+      slug: row.live_slug,
+      title: row.live_title,
       contributorNote: row.contributor_note,
       editorialReason: row.editorial_reason,
     },
@@ -334,9 +334,8 @@ export async function getRecipeChangeSetConflictContext(changeSetId: string, act
     proposed,
     comparison,
     baseStale,
-    stale,
     controlMode: controlMode(row, actor),
-    canRequestResolution: (actor.role === "editor" || actor.role === "admin") && row.status === "review",
+    canRequestResolution: (actor.role === "editor" || actor.role === "admin") && row.change_set_status === "review",
     rebases: rebases.results ?? [],
   };
 }
@@ -400,20 +399,22 @@ export async function rebaseRecipeChangeSet(input: {
   const database = getDatabase()!;
   const row = await loadConflictRow(database, input.changeSetId);
   if (!row || !canView(row, input.actor)) throw new RecipeSubmissionError("forbidden", "This private change set is unavailable.");
-  if (row.revision !== input.expectedRevision) throw new RecipeSubmissionError("conflict", "The private change set changed after the conflict view opened.");
+  if (row.change_set_revision !== input.expectedRevision) {
+    throw new RecipeSubmissionError("conflict", "The private change set changed after the conflict view opened.");
+  }
   const mode = controlMode(row, input.actor);
   if (!mode) throw new RecipeSubmissionError("forbidden", "This change set is not currently controlled by your account.");
-  if (row.status !== "published") {
+  if (row.live_status !== "published") {
     throw new RecipeSubmissionError("conflict", "The live recipe must remain published before a private rebase can occur.");
   }
-  if (row.revision === row.base_recipe_revision && row.content_revision === row.base_content_revision) {
+  if (row.live_revision === row.base_recipe_revision && row.live_content_revision === row.base_content_revision) {
     throw new RecipeSubmissionError("invalid", "This private change set is already based on the current live recipe.");
   }
 
   const content = await loadRecipeContent(database, row.recipe_id);
   const baseline = parseDraftJson(row.base_content_json, "Stored baseline");
   const proposed = parseDraftJson(row.content_json, "Stored proposal");
-  const live = toDraft(row, content);
+  const live = toLiveDraft(row, content);
   const comparison = buildRecipeChangeSetThreeWay(baseline, live, proposed);
   const conflictKeys = new Set(comparison.units.filter((unit) => unit.state === "conflict").map((unit) => unit.key));
   for (const [key, value] of Object.entries(input.resolutions)) {
@@ -429,7 +430,7 @@ export async function rebaseRecipeChangeSet(input: {
       mediaAssetId: merged.mediaAssetId,
       ownerId: row.owner_id,
       recipeId: row.recipe_id,
-      changeSetId: row.id,
+      changeSetId: row.change_set_id,
     }),
   ]);
 
@@ -445,7 +446,7 @@ export async function rebaseRecipeChangeSet(input: {
   }
   if (resolutionJson.length > 20000) throw new RecipeSubmissionError("invalid", "The conflict resolution record is too large.");
 
-  const nextRevision = row.revision + 1;
+  const nextRevision = row.change_set_revision + 1;
   const controlSql = mode === "contributor"
     ? `AND owner_id = ? AND (status = 'changes_requested' OR NOT EXISTS (
          SELECT 1 FROM recipe_change_set_origins o WHERE o.change_set_id = recipe_change_sets.id
@@ -467,18 +468,18 @@ export async function rebaseRecipeChangeSet(input: {
            AND r.status = 'published' AND r.revision = ? AND r.content_revision = ?
        )`,
   ).bind(
-    row.revision,
-    row.content_revision,
+    row.live_revision,
+    row.live_content_revision,
     liveJson,
     mergedJson,
     merged.mediaAssetId,
-    row.id,
+    row.change_set_id,
     input.expectedRevision,
     row.base_recipe_revision,
     row.base_content_revision,
     ...controlBindings,
-    row.revision,
-    row.content_revision,
+    row.live_revision,
+    row.live_content_revision,
   );
   const audit = database.prepare(
     `INSERT INTO recipe_change_set_rebases (
@@ -492,16 +493,16 @@ export async function rebaseRecipeChangeSet(input: {
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
   ).bind(
     `recipe_rebase_${crypto.randomUUID()}`,
-    row.id,
+    row.change_set_id,
     row.recipe_id,
     input.actor.id,
     RECIPE_THREE_WAY_STRATEGY_VERSION,
-    row.revision,
+    row.change_set_revision,
     nextRevision,
     row.base_recipe_revision,
     row.base_content_revision,
-    row.revision,
-    row.content_revision,
+    row.live_revision,
+    row.live_content_revision,
     comparison.summary.proposalOnly,
     comparison.summary.liveOnly,
     comparison.summary.sameChange,
@@ -524,11 +525,11 @@ export async function rebaseRecipeChangeSet(input: {
   }
 
   return {
-    id: row.id,
-    status: row.status,
+    id: row.change_set_id,
+    status: row.change_set_status,
     revision: nextRevision,
-    baseRecipeRevision: row.revision,
-    baseContentRevision: row.content_revision,
+    baseRecipeRevision: row.live_revision,
+    baseContentRevision: row.live_content_revision,
     summary: comparison.summary,
   };
 }
@@ -540,7 +541,9 @@ export async function requestRecipeChangeSetConflictResolution(input: {
   reason?: string;
 }) {
   const reason = input.reason?.trim().replace(/\s+/g, " ").slice(0, 1000) ?? "";
-  if (reason.length < 10) throw new RecipeSubmissionError("invalid", "Describe the required conflict resolution with at least 10 characters.");
+  if (reason.length < 10) {
+    throw new RecipeSubmissionError("invalid", "Describe the required conflict resolution with at least 10 characters.");
+  }
   const database = getDatabase();
   if (!database) throw new RecipeSubmissionError("unavailable", "Published recipe change sets are unavailable.");
   const nextRevision = input.expectedRevision + 1;
