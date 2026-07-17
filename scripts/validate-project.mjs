@@ -114,7 +114,7 @@ async function validateMigrations() {
     .filter((filename) => filename.endsWith(".sql"))
     .sort();
 
-  assert(filenames.length >= 3, "Expected at least three D1 migrations.");
+  assert(filenames.length >= 4, "Expected at least four D1 migrations.");
 
   filenames.forEach((filename, index) => {
     assert(/^\d{4}_[a-z0-9_]+\.sql$/.test(filename), `Invalid migration filename: ${filename}`);
@@ -137,6 +137,32 @@ async function validateMigrations() {
   for (const code of ["CA", "NZ", "DE", "CH", "SE", "NL"]) {
     assert(coverage.includes(`'${code}'`), `Market coverage migration is missing ${code}.`);
   }
+
+  const auth = await readFile(path.join(migrationDirectory, "0004_auth_security.sql"), "utf8");
+  for (const field of [
+    "email_verified_at",
+    "status",
+    "auth_version",
+    "password_changed_at",
+    "last_login_at",
+    "failed_login_count",
+    "locked_until",
+  ]) {
+    assert(auth.includes(field), `Authentication migration is missing ${field}.`);
+  }
+}
+
+async function validateAuthFoundation() {
+  const source = await readFile(path.join(root, "src", "lib", "auth.ts"), "utf8");
+  assert(source.includes("PASSWORD_ITERATIONS = 600_000"), "Password hashing work factor was reduced below the approved baseline.");
+  assert(source.includes("__Host-ozzyl_session"), "Production session cookie must retain the __Host- prefix.");
+  assert(source.includes("https://challenges.cloudflare.com/turnstile/v0/siteverify"), "Turnstile Siteverify integration is missing.");
+  assert(source.includes("validateCsrfToken"), "Signed CSRF validation is missing from the authentication foundation.");
+  assert(source.includes("constantTimeEqual"), "Constant-time credential comparison is missing.");
+
+  const middleware = await readFile(path.join(root, "src", "middleware.ts"), "utf8");
+  assert(middleware.includes("https://challenges.cloudflare.com"), "Content Security Policy does not allow the Turnstile origin.");
+  assert(middleware.includes("getAuthContext"), "Authentication context is not loaded by middleware.");
 }
 
 async function validateBrowserScripts() {
@@ -166,6 +192,7 @@ async function validateBrowserScripts() {
 validateCategories();
 validateRecipes();
 await validateMigrations();
+await validateAuthFoundation();
 await validateBrowserScripts();
 
 if (errors.length > 0) {
@@ -174,4 +201,4 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, ordered D1 migrations, and public browser scripts.`);
+console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, ordered D1 migrations, authentication invariants, and public browser scripts.`);
