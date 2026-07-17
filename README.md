@@ -34,9 +34,31 @@ The same repository contract works with the static catalogue and future D1 data.
 - Adjustable servings with ingredient scaling
 - Approximate US and metric measurement conversion
 - Original-measurement mode for precision recipes
-- Print-friendly recipe view
-- Copy-link action
+- Print-friendly recipe view and copy-link action
 - Browser-local saved recipe collection
+- One-click addition of currently displayed ingredient quantities to a shopping list
+- One-click placement of a recipe on the next open meal-plan day
+- Distraction-free guided cooking route at `/recipes/:slug/cook`
+- Large step-by-step directions, progress tracking, keyboard navigation, countdown timers, completion sound, and supported screen wake lock
+
+### Private kitchen planning
+
+- Browser-local shopping list at `/shopping-list`
+- Purchased-item checking, individual removal, clear-checked, clear-all, and copy-to-clipboard controls
+- Browser-local seven-day meal planner at `/meal-plan`
+- Previous/current/next week navigation, per-day recipe assignment, weekly copy, and week clearing
+- Shopping and meal-plan counts shown in desktop and mobile navigation
+- Cross-tab updates through storage events
+- No account or server data transfer is required for these tools
+
+### Offline and install foundation
+
+- Web application manifest and branded SVG application icon
+- Service worker registration on secure origins
+- Network-first navigation caching with an offline fallback page
+- Cache-first same-origin scripts, styles, images, and fonts
+- Previously opened cacheable recipe pages can be revisited during temporary connection loss
+- APIs and media routes are intentionally excluded from service-worker interception
 
 ### Contributor drafts
 
@@ -50,6 +72,13 @@ The same repository contract works with the static catalogue and future D1 data.
 
 Draft images and public publishing remain disabled until authentication, Turnstile, R2 upload authorization, and moderation are connected.
 
+### Accessibility
+
+- Keyboard skip link and visible focus states
+- Responsive mobile navigation with current-page indicators
+- Reduced-motion support
+- Accessible labels for market selection, recipe controls, editor rows, timers, shopping items, and planning controls
+
 ### SEO and security
 
 - Schema.org Recipe structured data
@@ -57,7 +86,7 @@ Draft images and public publishing remain disabled until authentication, Turnsti
 - Dynamic sitemap and robots endpoints
 - Crawlable market and category pages
 - Real HTTP 404 responses for unknown recipes, categories, and markets
-- Personal/editor routes marked `noindex`
+- Personal/editor/planning routes marked `noindex`
 - Astro middleware security headers
 - Content Security Policy
 - HSTS on HTTPS
@@ -67,6 +96,7 @@ Draft images and public publishing remain disabled until authentication, Turnsti
 ### Integrity and operations
 
 - Dependency-free validation of catalogue IDs, slugs, market coverage, taxonomy references, ingredient/step ordering, and D1 migration order
+- Syntax validation for every public browser script and the service worker
 - Runtime health diagnostics for data mode, market coverage, and Cloudflare binding readiness
 - Credentialed deployment smoke tests for expected data mode and KV/R2/Images/D1 bindings
 
@@ -83,6 +113,7 @@ Draft images and public publishing remain disabled until authentication, Turnsti
 | Future sessions | Workers KV |
 | Market detection | Cloudflare request `cf.country` |
 | CI/CD | GitHub Actions + Wrangler Action v4 |
+| Offline support | Web manifest + service worker runtime cache |
 | Bot protection | Turnstile planned for account/write routes |
 | Background work | Queues planned |
 | Semantic search | Workers AI + Vectorize planned |
@@ -122,7 +153,7 @@ npm run validate
 npm run dev
 ```
 
-This starts the application in D1-free mode.
+This starts the application in D1-free mode. Service-worker registration only runs in a secure browser context, so normal local HTTP development is not blocked by offline support.
 
 To test the future database schema locally:
 
@@ -133,7 +164,7 @@ npm run build:d1
 
 ## GitHub Actions
 
-- `.github/workflows/ci.yml` validates the catalogue and migrations, installs locked dependencies, generates Cloudflare types, and builds the Astro Worker.
+- `.github/workflows/ci.yml` validates the catalogue, migrations, browser-script syntax, installs locked dependencies, generates Cloudflare types, and builds the Astro Worker.
 - `.github/workflows/deploy.yml` deploys the D1-free Worker after changes reach `main`, then verifies static data mode, ten markets, and KV/R2/Images bindings.
 - `.github/workflows/enable-d1.yml` is manually triggered and requires typing `ENABLE_D1` before provisioning D1, applying migrations, deploying, and verifying database mode and all bindings.
 
@@ -151,8 +182,13 @@ See `docs/CLOUDFLARE_SETUP.md` for exact Cloudflare permissions and GitHub setup
 - `/markets` and `/markets/:country` — country discovery
 - `/categories` and `/categories/:slug` — taxonomy discovery
 - `/recipes/:slug` — interactive recipe detail
+- `/recipes/:slug/cook` — private guided cooking mode
 - `/saved` — private browser-local collection
+- `/shopping-list` — private browser-local ingredient list
+- `/meal-plan` — private browser-local weekly planner
 - `/recipes/new` — private autosaved contributor draft editor
+- `/offline` — service-worker navigation fallback
+- `/manifest.webmanifest` and `/sw.js` — install and offline foundation
 - `/api/recipes` — filtered recipe JSON API
 - `/api/recipes/validate` — contributor draft validation API
 - `/api/location` — persistent market selection
@@ -178,7 +214,7 @@ Migration commands always use `wrangler.d1.jsonc`, keeping the current productio
 1. Authentication, email verification, roles, secure KV sessions, and Turnstile
 2. Signed R2 image uploads, image metadata, moderation, and Cloudflare Images delivery
 3. D1-backed contributor publishing and editorial review workflow
-4. Account-synchronised saves, ratings, reviews, comments, and collections
+4. Account-synchronised saves, shopping lists, meal plans, ratings, reviews, comments, and collections
 5. Nutrition editing and verified conversion metadata
 6. Admin taxonomy, localisation, and content moderation tools
 7. Queued media/email jobs and search indexing
