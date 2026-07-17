@@ -1,0 +1,23 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Offline — Ozzyl Recipes"
+  description="Ozzyl Recipes is currently offline."
+  robots="noindex,nofollow"
+>
+  <section class="section">
+    <div class="container">
+      <div class="empty-state">
+        <p class="eyebrow">Offline mode</p>
+        <h1 class="section-title">The connection dropped.</h1>
+        <p class="section-copy" style="margin-inline:auto">Previously opened recipe pages may still be available. Reconnect to discover new recipes or sync fresh content.</p>
+        <div class="filter-actions" style="justify-content:center">
+          <button class="button" type="button" onclick="window.location.reload()">Try again</button>
+          <a class="button button--ghost" href="/saved">Open saved recipes</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
