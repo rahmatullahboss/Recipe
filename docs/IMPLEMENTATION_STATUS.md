@@ -18,7 +18,8 @@ Read [`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md) for authoritative continuation c
 | Scheduled publication and cancellation | Complete in code | Disabled |
 | Guarded manual due processor | Complete in code | Disabled; no automatic cron configured |
 | Archive restoration to private review | Complete in code | Disabled |
-| Contributor revisions of published recipes | Not implemented | Not available |
+| Contributor private change sets for published recipes | Complete in code | Disabled |
+| Editor-authored change sets and snapshot restore | Not implemented | Not available |
 | Community/account synchronization | Not implemented | Not available |
 
 The public product remains D1-free. Trusted writes were not activated.
@@ -62,6 +63,7 @@ The public product remains D1-free. Trusted writes were not activated.
 - Original bytes never publicly served
 - Owner/editor private no-store derivative previews
 - Approval and complete-current-derivative public gate
+- Active recipe/change-set media reservations
 - Rejection/quarantine/deletion cleanup
 - Guarded regeneration and delete routes
 
@@ -82,28 +84,45 @@ The public product remains D1-free. Trusted writes were not activated.
 
 Migration `0009_recipe_publication_workflow` adds:
 
-- `scheduled_publish_at`
-- `scheduled_by`
-- `schedule_revision`
-- `archived_at`
-- `restored_at`
-- due/archived indexes
-- `recipe_publication_events`
+- future UTC schedule/replace/cancel;
+- schedule ownership and `schedule_revision` guard;
+- due/archived indexes;
+- `recipe_publication_events`;
+- immediate and due publication through the same final content/media checks;
+- deterministic manual editor/admin due processing;
+- conflict-safe per-recipe atomic batches;
+- `archived → review` restoration only;
+- no automatic Cron Trigger.
+
+See [`RECIPE_PUBLICATION_WORKFLOW.md`](RECIPE_PUBLICATION_WORKFLOW.md).
+
+### Private published-recipe change sets
+
+Migration `0010_published_recipe_change_sets` adds:
+
+- `recipe_change_sets`;
+- `recipe_change_set_events`;
+- one active private change set per recipe;
+- exact base recipe/content revisions;
+- private baseline and proposed full recipe JSON;
+- proposed media reservation;
+- contributor/editor queue indexes;
+- published-owner and cross-table media reservation triggers.
 
 Implemented behavior:
 
-- Schedule or replace a future UTC publication time
-- Cancel an active schedule
-- Increment revision on every schedule mutation
-- Require `schedule_revision = revision` for due eligibility
-- Recheck content, approved media, source checksum, policy version, and required derivative count at final promotion
-- Clear schedule state on publish or archive
-- Guarded editor/admin manual processor with deterministic ordering and per-recipe atomic batches
-- Idempotent retries and conflict-safe concurrent processing
-- Restore `archived → review` only
-- Separate publication workflow history
-- Non-secret health diagnostics
-- Automatic cron explicitly reported as not configured
+- Only the owning contributor can create a private update for a `published` recipe.
+- Create/save/submit/request-changes/cancel do not mutate the live recipe.
+- Contributor saves and submissions revalidate canonical content, category existence, exact live base, media ownership, derivative readiness, and reservation state.
+- Editor/admin review compares private baseline and proposed content.
+- Approval revalidates live base, approved media, current checksum, derivative policy, and mandatory variants.
+- A temporary unique `revision_write_token` guards live scalar and normalized relational replacement.
+- Successful approval keeps status `published`, increments `revision` and `content_revision`, clears old scheduling state, and records resulting revisions.
+- Failed or stale approval leaves the live recipe and normalized relations unchanged.
+- Private pages/APIs are no-store/noindex where applicable.
+- Activation health checks fail closed if isolation, base guards, media reservation, derivative revalidation, atomic promotion, or audit capabilities are missing.
+
+See [`PUBLISHED_RECIPE_CHANGE_SETS.md`](PUBLISHED_RECIPE_CHANGE_SETS.md).
 
 ## Authoritative migrations
 
@@ -117,6 +136,7 @@ migrations/d1/0006_recipe_editorial/migration.sql
 migrations/d1/0007_recipe_revisions/migration.sql
 migrations/d1/0008_media_derivatives/migration.sql
 migrations/d1/0009_recipe_publication_workflow/migration.sql
+migrations/d1/0010_published_recipe_change_sets/migration.sql
 ```
 
 Wrangler applies only the nested sequence through `migrations_pattern`. Root SQL files remain legacy references.
@@ -130,23 +150,23 @@ MEDIA_UPLOADS_ENABLED=false
 RECIPE_SUBMISSIONS_ENABLED=false
 ```
 
-No D1 activation, account provisioning, upload, real moderation, recipe creation, scheduling, publication, restoration, deployment, merge, or production change occurred.
+No D1 activation, account provisioning, upload, real moderation, recipe creation, private change-set operation, scheduling, publication, restoration, deployment, merge, or production change occurred.
 
 ## Validation baseline
 
 Implementation head:
 
 ```text
-15fa2ce2f2ac6aa2c823585075ed19d368b94d1f
+e71f4b37a0af63f0e4804a7d3d911223b9a994c4
 ```
 
-GitHub Actions CI run `#310` passed:
+GitHub Actions CI run `#336` passed:
 
 - checkout and Node.js 24 setup;
 - locked dependency installation;
-- catalogue/security/publication validator;
+- catalogue/security/change-set validator;
 - operational script validation;
-- all nine local D1 migrations;
+- all ten local D1 migrations;
 - D1-free Worker build;
 - D1 Worker build.
 
@@ -154,18 +174,22 @@ Documentation commits may move the current branch head. Always fetch PR `#1` bef
 
 ## Important new routes
 
-- `POST /api/recipes/:id/editorial` — publish, schedule, cancel schedule, request changes, archive, or restore
+- `/account/submissions/:id/change-set` — owner-only private published update editor/status
+- `POST /api/recipes/:id/change-set` — create, save, submit, or cancel owner change set
+- `/admin/recipe-change-sets` — editor/admin private update queue
+- `/admin/recipe-change-sets/:id` — baseline/proposal comparison and audit history
+- `POST /api/recipe-change-sets/:id/editorial` — request changes, approve/promote, or cancel
+- `POST /api/recipes/:id/editorial` — publish, schedule, cancel schedule, request changes, archive, or restore initial submissions
 - `POST /api/recipes/scheduled/process` — guarded editor/admin due processor
-- `/admin/recipes` — review queue, schedule/archive operations, manual processor
-- `/admin/recipes/:id` — schedule, cancellation, restoration, and publication history
 
 ## Remaining work
 
-1. Execute controlled non-production acceptance for all account/media/derivative/submission/revision/schedule/archive/rollback cases.
-2. Add private change sets for contributor revisions of already published recipes while preserving the live published row until atomic approval.
-3. Add editor-authored content editing and snapshot restore.
-4. Add optional Cloudflare Cron/queue execution only after manual processor acceptance and incident procedures.
-5. Approve legal, retention, moderation, verification-email, and deletion operations.
-6. Add synchronized saves, shopping lists, meal plans, ratings, reviews, comments, and collections.
-7. Add password reset, email change, account deletion, and administration interfaces.
-8. Add taxonomy/localization/nutrition administration, search indexing, recommendations, analytics, and advertising controls.
+1. Execute controlled non-production acceptance for all account/media/derivative/submission/revision/schedule/archive/change-set/concurrency/rollback cases.
+2. Add editor-authored private change sets using the same live-row isolation and atomic promotion model.
+3. Restore a historical recipe snapshot into a new private change set rather than mutating live content.
+4. Add richer three-way conflict comparison or merge assistance without weakening optimistic rejection.
+5. Add optional Cloudflare Cron/queue execution only after manual processor acceptance and incident procedures.
+6. Approve legal, retention, moderation, verification-email, and deletion operations.
+7. Add synchronized saves, shopping lists, meal plans, ratings, reviews, comments, and collections.
+8. Add password reset, email change, account deletion, and administration interfaces.
+9. Add taxonomy/localization/nutrition administration, search indexing, recommendations, analytics, and advertising controls.
