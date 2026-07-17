@@ -38,6 +38,7 @@ async function validateMigrations() {
     "0006_recipe_editorial",
     "0007_recipe_revisions",
     "0008_media_derivatives",
+    "0009_recipe_publication_workflow",
   ];
   const actual = (await readdir(directory, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory())
@@ -79,6 +80,18 @@ async function validateMigrations() {
     "media_assets_derivatives_regenerate_after_source_change",
   ]) {
     assert(sql.get("0008_media_derivatives")?.includes(token), `Media derivative migration is missing ${token}.`);
+  }
+  for (const token of [
+    "scheduled_publish_at",
+    "scheduled_by",
+    "schedule_revision",
+    "archived_at",
+    "restored_at",
+    "recipe_publication_events",
+    "scheduled_published",
+    "idx_recipes_scheduled_publication",
+  ]) {
+    assert(sql.get("0009_recipe_publication_workflow")?.includes(token), `Recipe publication workflow migration is missing ${token}.`);
   }
 
   const wrangler = await readFile(path.join(root, "wrangler.d1.jsonc"), "utf8");
@@ -189,6 +202,21 @@ async function validateSecurityFoundations() {
     assert(revisions.includes(token), `Recipe revision invariant is missing: ${token}.`);
   }
 
+  const publication = await readFile(path.join(root, "src", "lib", "recipe-publication.ts"), "utf8");
+  for (const token of [
+    "scheduleRecipePublication",
+    "cancelRecipeSchedule",
+    "processDueScheduledPublications",
+    "restoreArchivedRecipe",
+    "schedule_revision = revision",
+    "scheduled_publish_at <= CURRENT_TIMESTAMP",
+    "publicationGateSql",
+    "database.batch",
+    "automaticCronConfigured: false",
+  ]) {
+    assert(publication.includes(token), `Recipe publication workflow invariant is missing: ${token}.`);
+  }
+
   const submitRoute = await readFile(path.join(root, "src", "pages", "api", "recipes", "submissions.ts"), "utf8");
   assert(submitRoute.includes('validateCsrfToken("recipe-submit"'), "Recipe submission CSRF check is missing.");
   assert(submitRoute.includes("consumeRateLimit"), "Recipe submission rate limit is missing.");
@@ -203,7 +231,15 @@ async function validateSecurityFoundations() {
   const editorialRoute = await readFile(path.join(root, "src", "pages", "api", "recipes", "[id]", "editorial.ts"), "utf8");
   assert(editorialRoute.includes('validateCsrfToken("recipe-editorial"'), "Recipe editorial CSRF check is missing.");
   assert(editorialRoute.includes('locals.user.role !== "editor"'), "Recipe editorial role check is missing.");
-  assert(editorialRoute.includes('action !== "request_changes"'), "Recipe requested-changes action is missing.");
+  for (const token of ["request_changes", "schedule", "cancel_schedule", "restore", "publishRecipeNow"]) {
+    assert(editorialRoute.includes(token), `Recipe editorial route is missing action: ${token}.`);
+  }
+
+  const scheduleRoute = await readFile(path.join(root, "src", "pages", "api", "recipes", "scheduled", "process.ts"), "utf8");
+  assert(scheduleRoute.includes('validateCsrfToken("recipe-schedule-process"'), "Scheduled processor CSRF check is missing.");
+  assert(scheduleRoute.includes('locals.user.role !== "editor"'), "Scheduled processor role check is missing.");
+  assert(scheduleRoute.includes("processDueScheduledPublications"), "Scheduled processor implementation is missing.");
+  assert(scheduleRoute.includes('"Cache-Control": "private, no-store"'), "Scheduled processor responses must remain private and no-store.");
 
   const moderation = await readFile(path.join(root, "src", "lib", "media-moderation.ts"), "utf8");
   for (const token of ["media_derivative_jobs", "required_variant_count", "ready_variant_count", "MEDIA_DERIVATIVE_POLICY_VERSION"]) {
@@ -231,8 +267,13 @@ async function validateSecurityFoundations() {
     "publicDeliveryRequiresReadyDerivatives",
     "metadataStrippingVerified",
     "idempotentLocks",
+    "scheduledPublishing",
+    "guardedScheduleProcessor",
+    "archiveRestore",
+    "scheduledAtomicPromotion",
+    "automaticScheduleCronConfigured",
   ]) {
-    assert(health.includes(token), `Derivative health capability is missing: ${token}.`);
+    assert(health.includes(token), `Health capability is missing: ${token}.`);
   }
 }
 
@@ -258,4 +299,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, eight D1 migrations, guarded authentication, privacy-safe media derivatives, recipe editorial and contributor revision invariants, and browser scripts.`);
+console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, nine D1 migrations, guarded authentication, privacy-safe media derivatives, scheduled publication, archive restoration, recipe editorial and contributor revision invariants, and browser scripts.`);
