@@ -18,7 +18,7 @@ on:
         default: false
         type: boolean
       enable_recipe_submissions:
-        description: Open D1 recipe submissions, requested changes, revisions, and publishing after media review is tested
+        description: Open D1 recipe submissions, revisions, scheduling, and guarded publishing after media review is tested
         required: true
         default: false
         type: boolean
@@ -203,6 +203,13 @@ jobs:
             if (expectRecipeSubmissions && health.recipeSubmissions?.requestedChanges !== true) failures.push("editor requested changes are not available");
             if (expectRecipeSubmissions && health.recipeSubmissions?.immutableSnapshots !== true) failures.push("immutable recipe snapshots are not available");
             if (expectRecipeSubmissions && health.recipeSubmissions?.optimisticLocking !== true) failures.push("recipe optimistic locking is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.scheduledPublishing !== true) failures.push("scheduled publishing is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.guardedScheduleProcessor !== true) failures.push("guarded schedule processor is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.archiveRestore !== true) failures.push("archive restoration is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.scheduledRevisionGuard !== true) failures.push("schedule revision guard is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.scheduledMediaRevalidation !== true) failures.push("scheduled media revalidation is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.scheduledAtomicPromotion !== true) failures.push("scheduled atomic promotion is not available");
+            if (health.recipeSubmissions?.automaticScheduleCronConfigured !== false) failures.push("automatic schedule cron must remain disabled until separately reviewed");
             if (failures.length) {
               console.error(failures.join("\n"));
               process.exit(1);
