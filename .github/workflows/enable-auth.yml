@@ -12,6 +12,11 @@ on:
         required: true
         default: false
         type: boolean
+      enable_media_uploads:
+        description: Open moderated contributor image uploads after the R2 review workflow is tested
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -63,13 +68,13 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
-      - name: Validate project and authentication migrations
+      - name: Validate project, account, and media migrations
         run: npm run validate
 
       - name: Build D1 Worker
         run: npm run build:d1
 
-      - name: Prepare ephemeral auth config and encrypted secrets input
+      - name: Prepare ephemeral account config and encrypted secrets input
         env:
           AUTH_PASSWORD_PEPPER: ${{ secrets.AUTH_PASSWORD_PEPPER }}
           AUTH_FINGERPRINT_PEPPER: ${{ secrets.AUTH_FINGERPRINT_PEPPER }}
@@ -79,16 +84,19 @@ jobs:
           AUTH_EMAIL_WEBHOOK_URL: ${{ vars.AUTH_EMAIL_WEBHOOK_URL }}
           AUTH_FROM_EMAIL: ${{ vars.AUTH_FROM_EMAIL }}
           ENABLE_REGISTRATION: ${{ inputs.enable_registration }}
+          ENABLE_MEDIA_UPLOADS: ${{ inputs.enable_media_uploads }}
         run: |
           node --input-type=module <<'NODE'
           import fs from "node:fs";
 
           const registrationEnabled = process.env.ENABLE_REGISTRATION === "true";
+          const mediaUploadsEnabled = process.env.ENABLE_MEDIA_UPLOADS === "true";
           const config = JSON.parse(fs.readFileSync("wrangler.d1.jsonc", "utf8"));
           config.vars = {
             ...(config.vars ?? {}),
             AUTH_ENABLED: "true",
             AUTH_REGISTRATION_ENABLED: String(registrationEnabled),
+            MEDIA_UPLOADS_ENABLED: String(mediaUploadsEnabled),
             TURNSTILE_SITE_KEY: process.env.TURNSTILE_SITE_KEY,
           };
 
@@ -111,7 +119,7 @@ jobs:
           fs.writeFileSync(".auth-secrets.json", JSON.stringify(secrets), { mode: 0o600 });
           NODE
 
-      - name: Provision D1 Worker with authentication disabled
+      - name: Provision D1 Worker with accounts and uploads disabled
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -125,7 +133,7 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: d1 migrations apply DB --remote --config wrangler.d1.jsonc
 
-      - name: Deploy authentication-enabled Worker
+      - name: Deploy account-enabled Worker
         id: deploy
         uses: cloudflare/wrangler-action@v4
         with:
@@ -134,10 +142,11 @@ jobs:
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
           command: deploy --config .wrangler.auth.json --secrets-file .auth-secrets.json
 
-      - name: Verify authentication deployment
+      - name: Verify account and media deployment
         env:
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment-url }}
           EXPECT_REGISTRATION: ${{ inputs.enable_registration }}
+          EXPECT_MEDIA_UPLOADS: ${{ inputs.enable_media_uploads }}
         run: |
           test -n "$DEPLOYMENT_URL" || { echo "Wrangler did not return a deployment URL"; exit 1; }
           HEALTH_JSON=$(curl --fail --silent --show-error --retry 5 --retry-delay 3 "$DEPLOYMENT_URL/api/health")
@@ -145,6 +154,7 @@ jobs:
           HEALTH_JSON="$HEALTH_JSON" node --input-type=module -e '
             const health = JSON.parse(process.env.HEALTH_JSON ?? "{}");
             const expectRegistration = process.env.EXPECT_REGISTRATION === "true";
+            const expectMediaUploads = process.env.EXPECT_MEDIA_UPLOADS === "true";
             const failures = [];
             if (health.ok !== true) failures.push("health.ok is not true");
             if (health.dataMode !== "d1") failures.push(`unexpected dataMode: ${health.dataMode}`);
@@ -152,12 +162,15 @@ jobs:
             if (health.authentication?.ready !== true) failures.push("authentication is not ready");
             if (health.authentication?.registrationEnabled !== expectRegistration) failures.push("registration flag does not match the workflow input");
             if (expectRegistration && health.authentication?.registrationReady !== true) failures.push("registration is not ready");
+            if (health.media?.uploadsEnabled !== expectMediaUploads) failures.push("media upload flag does not match the workflow input");
+            if (health.media?.storageReady !== true) failures.push("media storage is not ready");
+            if (expectMediaUploads && health.media?.ready !== true) failures.push("media uploads are not ready");
             if (failures.length) {
               console.error(failures.join("\n"));
               process.exit(1);
             }
           '
-          echo "Authentication deployment completed and verified: $DEPLOYMENT_URL"
+          echo "Account and media deployment completed and verified: $DEPLOYMENT_URL"
 
       - name: Remove ephemeral secret files
         if: always()
