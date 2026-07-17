@@ -7,6 +7,7 @@ import { markets } from "../../lib/market";
 import { getMediaReadiness } from "../../lib/media";
 import { getMediaDerivativeReadiness } from "../../lib/media-derivatives";
 import { getMediaRuntimeStatus } from "../../lib/media-runtime";
+import { getPublishedRecipeChangeSetReadiness } from "../../lib/recipe-change-sets";
 import { getRecipePublicationWorkflowReadiness } from "../../lib/recipe-publication";
 import { getRecipeSubmissionReadiness } from "../../lib/recipe-submissions";
 
@@ -27,6 +28,7 @@ export const GET: APIRoute = async () => {
   const mediaRuntime = getMediaRuntimeStatus();
   const recipeSubmissions = getRecipeSubmissionReadiness();
   const publicationWorkflow = getRecipePublicationWorkflowReadiness();
+  const publishedChangeSets = getPublishedRecipeChangeSetReadiness();
 
   return Response.json(
     {
@@ -104,6 +106,15 @@ export const GET: APIRoute = async () => {
         scheduledMediaRevalidation: publicationWorkflow.mediaRevalidation,
         scheduledAtomicPromotion: publicationWorkflow.atomicPromotion,
         automaticScheduleCronConfigured: publicationWorkflow.automaticCronConfigured,
+        publishedChangeSets: publishedChangeSets.livePublishedRowIsolation,
+        oneActivePublishedChangeSet: publishedChangeSets.oneActiveChangeSetPerRecipe,
+        privatePublishedChangeSetSnapshots: publishedChangeSets.privateJsonSnapshots,
+        publishedChangeSetOptimisticLocking: publishedChangeSets.optimisticChangeSetRevision,
+        publishedChangeSetBaseGuard: publishedChangeSets.baseRecipeRevisionGuard,
+        publishedChangeSetMediaReservation: publishedChangeSets.mediaReservation,
+        publishedChangeSetApprovalMediaRevalidation: publishedChangeSets.approvalMediaRevalidation,
+        publishedChangeSetAtomicPromotion: publishedChangeSets.atomicRelationalPromotion,
+        publishedChangeSetAuditEvents: publishedChangeSets.immutableAuditEvents,
       },
       timestamp: new Date().toISOString(),
     },
