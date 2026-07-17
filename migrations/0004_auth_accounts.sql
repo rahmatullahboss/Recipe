@@ -1,34 +1,40 @@
 PRAGMA foreign_keys = ON;
 
--- Extend the original users table without changing existing foreign keys.
--- New public registrations must explicitly use pending_verification status.
+-- Extend the original users table without rebuilding it or disturbing recipe
+-- foreign keys. Public registrations start pending email verification.
 ALTER TABLE users ADD COLUMN email_verified_at TEXT;
 ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'pending_verification'
   CHECK (status IN ('pending_verification', 'active', 'locked', 'suspended', 'deleted'));
-ALTER TABLE users ADD COLUMN password_algorithm TEXT NOT NULL DEFAULT 'pbkdf2-sha256-v1';
+ALTER TABLE users ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 1 CHECK (auth_version > 0);
+ALTER TABLE users ADD COLUMN password_algorithm TEXT NOT NULL DEFAULT 'pbkdf2-sha256-hmacpepper-v1';
 ALTER TABLE users ADD COLUMN password_changed_at TEXT;
 ALTER TABLE users ADD COLUMN failed_login_count INTEGER NOT NULL DEFAULT 0 CHECK (failed_login_count >= 0);
 ALTER TABLE users ADD COLUMN locked_until TEXT;
 ALTER TABLE users ADD COLUMN last_login_at TEXT;
-ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1 CHECK (session_version > 0);
 ALTER TABLE users ADD COLUMN preferred_locale TEXT NOT NULL DEFAULT 'en';
 ALTER TABLE users ADD COLUMN terms_accepted_at TEXT;
 ALTER TABLE users ADD COLUMN deleted_at TEXT;
 
--- The seeded editor predates public registration and is treated as verified.
+-- The seeded editorial account predates public registration and is considered
+-- verified. It still cannot sign in until an administrator provisions a hash.
 UPDATE users
 SET status = 'active',
     email_verified_at = COALESCE(email_verified_at, CURRENT_TIMESTAMP),
-    password_changed_at = CASE WHEN password_hash IS NOT NULL THEN CURRENT_TIMESTAMP ELSE password_changed_at END
+    password_changed_at = CASE
+      WHEN password_hash IS NOT NULL THEN COALESCE(password_changed_at, CURRENT_TIMESTAMP)
+      ELSE password_changed_at
+    END
 WHERE role IN ('editor', 'admin');
 
--- Existing column-level UNIQUE constraints are case-sensitive. These indexes
--- prevent duplicate accounts that differ only by letter case.
+-- Original UNIQUE constraints are case-sensitive. These indexes enforce the
+-- identity semantics expected by login and registration.
 CREATE UNIQUE INDEX idx_users_email_nocase ON users(email COLLATE NOCASE);
 CREATE UNIQUE INDEX idx_users_username_nocase ON users(username COLLATE NOCASE);
 CREATE INDEX idx_users_status ON users(status, created_at DESC);
 CREATE INDEX idx_users_email_verified ON users(email_verified_at, status);
 
+-- Only token digests are stored. Plaintext verification/reset tokens exist
+-- only long enough to be delivered to the account owner.
 CREATE TABLE auth_tokens (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -46,6 +52,8 @@ CREATE INDEX idx_auth_tokens_user_purpose
 CREATE INDEX idx_auth_tokens_expiry
   ON auth_tokens(expires_at, consumed_at);
 
+-- Future OAuth providers can attach identities without changing the users
+-- table or weakening local-password account uniqueness.
 CREATE TABLE auth_identities (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -71,10 +79,11 @@ CREATE TABLE user_consents (
   UNIQUE (user_id, consent_type, document_version)
 );
 
-CREATE INDEX idx_user_consents_user ON user_consents(user_id, consent_type, accepted_at DESC);
+CREATE INDEX idx_user_consents_user
+  ON user_consents(user_id, consent_type, accepted_at DESC);
 
--- Store only hashes/fingerprints for network and user-agent metadata. Raw IP
--- addresses and full user-agent strings do not belong in the account audit log.
+-- Network and user-agent values are fingerprinted before insertion. Raw IP
+-- addresses and full user-agent strings are intentionally excluded.
 CREATE TABLE auth_audit_events (
   id TEXT PRIMARY KEY,
   user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
@@ -100,6 +109,9 @@ CREATE TABLE auth_audit_events (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_auth_audit_user ON auth_audit_events(user_id, created_at DESC);
-CREATE INDEX idx_auth_audit_type ON auth_audit_events(event_type, created_at DESC);
-CREATE INDEX idx_auth_audit_created ON auth_audit_events(created_at DESC);
+CREATE INDEX idx_auth_audit_user
+  ON auth_audit_events(user_id, created_at DESC);
+CREATE INDEX idx_auth_audit_type
+  ON auth_audit_events(event_type, created_at DESC);
+CREATE INDEX idx_auth_audit_created
+  ON auth_audit_events(created_at DESC);
