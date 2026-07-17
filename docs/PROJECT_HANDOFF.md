@@ -1,20 +1,21 @@
-# Ozzyl Recipes project handoff
+# Ozzyl Recipes Project Handoff
 
-This is the authoritative continuation summary for `rahmatullahboss/Recipe`, branch `feat/cloudflare-recipe-foundation`, pull request `#1`. Always fetch current PR metadata and current file blob SHAs before writing because documentation or concurrent work can move the branch.
+This is the authoritative continuation summary for `rahmatullahboss/Recipe`, branch `feat/cloudflare-recipe-foundation`, pull request `#1`.
+
+Always fetch current PR metadata and each current blob SHA before writing. Documentation and concurrent work may move the branch.
 
 ## Repository state
 
 - Repository: `rahmatullahboss/Recipe`
 - Branch: `feat/cloudflare-recipe-foundation`
 - Pull request: `#1`
-- PR title: `Build international Astro 7 recipe platform with guarded accounts, media, publishing, and revisions`
-- Privacy-safe derivative implementation was based on head `cf65d99446b4ca306948c049191a472a62c280bb`.
-- The final implementation/documentation head and final CI run must be recorded after GitHub synchronization; do not assume the base SHA remains current.
-- PR remains unmerged and no deployment was performed by this phase.
+- PR remains open and unmerged.
+- Scheduled-publication implementation code reached head `15fa2ce2f2ac6aa2c823585075ed19d368b94d1f` and passed CI run `#310`.
+- Documentation and activation-hardening commits followed; recheck the current final head and its CI before continuing.
 
-## Production and activation boundary
+## Production boundary
 
-The checked-in public deployment remains D1-free. The D1 configuration keeps every trusted write surface closed:
+The public application remains D1-free. Checked-in D1 configuration keeps every trusted-write surface closed:
 
 ```jsonc
 "AUTH_ENABLED": "false",
@@ -23,119 +24,165 @@ The checked-in public deployment remains D1-free. The D1 configuration keeps eve
 "RECIPE_SUBMISSIONS_ENABLED": "false"
 ```
 
-No production D1 activation, account provisioning, real media upload, real recipe creation/submission, moderation decision, publication, deployment, merge, or production change was performed. Do not perform any of those operations unless the user explicitly requests them in a later task.
+No deployment, D1 activation, account provisioning, real upload, real recipe creation/submission/scheduling/publication, moderation decision, archive restoration, merge, or production change was performed.
 
 ## Completed platform foundation
 
 ### Public product
 
 - Astro 7 SSR on Cloudflare Workers
-- D1-free international fallback catalogue covering ten initial markets
-- Market-aware discovery, search, JSON filtering, categories, cuisines, schema metadata, sitemap, robots, and real 404s
-- Serving scaling, measurement conversion, print/copy, browser-local saves, shopping list, seven-day meal plan, and guided cooking
-- PWA manifest, service worker, offline fallback, static cache strategy, and private/API/media cache exclusions
+- D1-free fallback catalogue for ten initial markets
+- Market-aware discovery, search/API, taxonomy pages, structured data, sitemap, robots, and real 404s
+- Serving scaling, measurement conversion, print/copy, saved recipes, shopping list, meal plan, and guided cooking
+- PWA manifest, service worker, offline fallback, and private/API/media cache exclusions
 
 ### Guarded authentication
 
 - Case-insensitive D1 identities and lifecycle states
-- PBKDF2-HMAC-SHA256 with 600,000 iterations, per-user salt, and server-only pepper
-- Verified-active-only KV sessions and production `__Host-` cookie
-- D1 `auth_version` revocation
-- Purpose-bound signed CSRF, same-origin checks, KV rate limits, Turnstile verification, lockout, verification token digests, consent, OAuth extension, and privacy-preserving audit events
-- Independent authentication and public-registration flags
+- PBKDF2-HMAC-SHA256 with 600,000 iterations, unique salt, and server-only pepper
+- Verified-active-only KV sessions and production host cookie
+- D1 session revocation version
+- Purpose-bound signed CSRF, same-origin checks, rate limits, Turnstile, lockout, verification token digests, consent, OAuth extension, and privacy-preserving audit events
+- Independent authentication and registration flags
 
-### Recipe contribution/editorial system
+### Private media and privacy-safe derivatives
+
+- One-time D1 upload intents and server-generated private R2 keys
+- JPEG/PNG/WebP validation, 8 MiB limit, dimension/40 MP/signature/MIME/size/checksum checks
+- EXIF orientation parsing and normalized dimensions
+- `recipe-images-v1` 320/640/960/1280 variants without upscaling
+- Required JPEG/WebP and optional exact-MIME AVIF through 960 px
+- Generated-byte metadata scanners
+- Deterministic policy/checksum keys and D1 generation leases
+- Source/output checksum and R2 ETag validation
+- Original bytes never served by `/media`
+- Owner/editor derivative-only `private, no-store` previews
+- Public delivery only for uploaded/approved parents with complete current derivatives
+- Guarded regeneration and rejection/quarantine/deletion cleanup
+
+### Contributor and editorial recipes
 
 - Atomic first submission into private `review`
 - Public D1 reads restricted to `published`
-- Editor/admin queue with publish, request changes, and archive
-- Owner-only correction editor for `review → draft → review`
+- Editor/admin queue and detailed review
+- Request changes and owner-only `review → draft → review` correction
 - Separate optimistic `revision` and `content_revision`
-- Temporary unique `revision_write_token` guarding every relational replacement statement
-- Race-safe resubmission with no partial category/ingredient/step replacement
+- Temporary unique `revision_write_token` guards relational replacement
 - Immutable `recipe_revision_snapshots`
-- Publication final update rechecks uploaded/approved media and current complete derivatives atomically
+- Final publication rechecks complete content, approved media, source checksum, derivative policy, and required derivative matrix
 
-## Privacy-safe media derivatives completed
+## Scheduled publication and archive restoration completed
 
-### Policy
+### Migration `0009_recipe_publication_workflow`
 
-`recipe-images-v1` generates bounded widths `320`, `640`, `960`, and `1280`, capped at the normalized source width with no upscaling.
+Adds:
 
-- JPEG quality 82: required universal fallback
-- WebP quality 82: required
-- AVIF quality 72 through 960 px: optional and stored only when the runtime returns exact `image/avif`
-- Transparent input is flattened to white for JPEG
+- `recipes.scheduled_publish_at`
+- `recipes.scheduled_by`
+- `recipes.schedule_revision`
+- `recipes.archived_at`
+- `recipes.restored_at`
+- due-schedule and archived-operation indexes
+- `recipe_publication_events`
 
-### Original privacy and validation
-
-- Original JPEG/PNG/WebP files remain in a private R2 bucket under server-generated keys.
-- `/media/...` never fetches or returns an original object.
-- Original R2 metadata uses `private, no-store`.
-- Declared MIME, raster signature, expected byte size, dimensions, 40 MP limit, SHA-256, and R2 ETag are checked.
-- JPEG APP1 EXIF, PNG `eXIf`, and WebP `EXIF` orientation are parsed.
-- Minimum dimensions are enforced after orientation normalization.
-
-### Metadata stripping and output verification
-
-Generation uses the Cloudflare `IMAGES` binding with server-side byte input. Before a derivative is accepted:
-
-- exact output MIME is checked;
-- output dimensions are compared with the normalized source aspect ratio;
-- JPEG rejects APP1, APP2, APP13, and COM segments;
-- WebP rejects EXIF, XMP, and ICC chunks;
-- AVIF rejects known EXIF/XMP payload markers;
-- generated byte size, SHA-256, and R2 HTTP ETag are stored in D1.
-
-### Idempotency and regeneration
-
-- D1 holds one derivative job per parent media asset.
-- Conditional generation leases prevent concurrent writers.
-- A stopped lease is reclaimable after five minutes.
-- A ready current-policy/current-checksum job is a no-op unless an editor/admin explicitly forces regeneration.
-- Deterministic R2 keys include parent ID, policy version, source checksum, width, and format.
-- Policy or source-checksum changes require a new ready matrix and mark stale variants for cleanup.
-- Source bytes are re-read from R2 and must match both D1 checksum and ETag before transformation.
-
-### Moderation and delivery
-
-Public derivative delivery requires:
+Publication event actions are:
 
 ```text
-parent upload_status = uploaded
-parent moderation_status = approved
-job policy/source = current parent policy/source
-job status = ready
-ready required count >= required variant count > 0
-derivative status = ready
-R2 ETag and size = D1 metadata
+schedule
+cancel_schedule
+published_now
+scheduled_published
+archive
+restore
 ```
 
-- Owner previews are limited to their pending/approved asset.
-- Editor/admin previews are role-gated.
-- Every preview is derivative-only with `private, no-store` and `Vary: Cookie, Accept`.
-- Public URLs are canonicalized with policy/checksum version tokens.
-- `Accept` negotiation prefers AVIF, then WebP, then JPEG; exact `format` may be requested.
-- Public responses use immutable one-year caching, `Vary: Accept`, ETag, output checksum, `nosniff`, and same-site resource policy.
-- Approval is blocked until mandatory JPEG/WebP derivatives are complete.
-- Rejection, quarantine, deletion, source replacement, or policy changes deny stale delivery before cleanup completes.
+### Schedule model
 
-### Lifecycle routes
+A scheduled recipe remains private in `review`. An active schedule requires:
 
-| Route | Purpose |
-| --- | --- |
-| `POST /api/media/intent` | One-time upload authorization |
-| `POST /api/media/upload` | Validate/store private original and generate derivatives |
-| `POST /api/media/:id/derivatives` | Owner/editor guarded regeneration; editor force option |
-| `POST /api/media/:id/moderate` | Editor/admin moderation with derivative-ready approval gate |
-| `DELETE /api/media/:id` | Owner/editor delete after confirming no recipe references the asset |
-| `GET|HEAD /media/:key` | Approval-gated public derivative or authorized private derivative preview |
+```text
+scheduled_publish_at is not null
+schedule_revision = revision
+```
 
-Mutation routes preserve authentication, same-origin, purpose-bound CSRF, session CSRF, ownership, and role checks. Delete marks D1 `deleted` first, then removes derivatives and the original, so partial cleanup fails closed.
+Scheduling or replacing a schedule increments recipe revision and stores the resulting value in `schedule_revision`. Any later recipe transition invalidates the old schedule through revision mismatch.
 
-## Authoritative D1 migrations
+Schedule times are UTC, at least five minutes in the future, and no more than one year ahead.
 
-Wrangler applies only:
+### Immediate and due publication gates
+
+Both paths repeat these checks in the final conditional D1 update:
+
+- status is still `review`;
+- optimistic recipe revision matches;
+- schedule revision/time match for due processing;
+- at least two ingredients;
+- at least two directions;
+- at least one category;
+- media is uploaded and approved;
+- derivative job matches current source checksum and `recipe-images-v1`;
+- all required JPEG/WebP variants are ready.
+
+Concurrent content, media, checksum, derivative, schedule, or status changes return conflict instead of publishing stale content.
+
+### Guarded manual processor
+
+Route:
+
+```text
+POST /api/recipes/scheduled/process
+```
+
+Requires:
+
+- verified session;
+- editor/admin role;
+- same-origin request;
+- purpose-bound `recipe-schedule-process` CSRF;
+- current session CSRF;
+- limit between 1 and 25;
+- complete recipe pipeline readiness.
+
+Due rows use deterministic time/ID ordering. Each recipe uses its own atomic D1 batch. Successful promotion clears schedule state and increments revision; re-running is idempotent.
+
+Automatic Cloudflare Cron or queue execution is intentionally not configured. Health reports `automaticScheduleCronConfigured=false`.
+
+### Archive restoration
+
+Archiving a review recipe clears schedule state and records `archived_at` plus publication audit history.
+
+Restoration is only:
+
+```text
+archived → review
+```
+
+It requires editor/admin reason and expected revision, clears schedule/write-token state, records `restored_at`, and never republishes directly.
+
+### Admin surfaces
+
+- `/admin/recipes` — review queue, active schedules, archived operations, manual due processor
+- `/admin/recipes/:id` — publish now, schedule/replace, cancel schedule, request changes, archive, restore to review, and publication history
+- `/api/recipes/:id/editorial` — guarded workflow actions
+- `/api/recipes/scheduled/process` — guarded manual due processor
+
+All remain private/no-store/noindex where applicable.
+
+## Health and activation hardening
+
+`/api/health` reports:
+
+- scheduled publishing
+- guarded schedule processor
+- archive restoration
+- schedule revision guard
+- scheduled media revalidation
+- atomic scheduled promotion
+- automatic schedule cron disabled
+
+The guarded authentication workflow checks these capabilities when recipe writes are requested. It fails closed if any capability is missing or automatic cron is unexpectedly enabled.
+
+## Authoritative migration chain
 
 ```text
 migrations/d1/0001_initial/migration.sql
@@ -146,70 +193,58 @@ migrations/d1/0005_media_pipeline/migration.sql
 migrations/d1/0006_recipe_editorial/migration.sql
 migrations/d1/0007_recipe_revisions/migration.sql
 migrations/d1/0008_media_derivatives/migration.sql
+migrations/d1/0009_recipe_publication_workflow/migration.sql
 ```
 
-Migration `0008_media_derivatives` adds source orientation/normalized dimensions, derivative jobs, derivative variant metadata, generation leases, checksum/ETag identity, policy/source regeneration, and rejection/quarantine/deletion cleanup triggers. Root SQL files remain legacy references outside Wrangler's migration path.
+Wrangler applies only this nested sequence. Root SQL files remain legacy references.
 
-## Health and guarded deployment checks
+## Validation evidence
 
-`/api/health` reports non-secret media capabilities:
+Implementation head `15fa2ce2f2ac6aa2c823585075ed19d368b94d1f` passed GitHub Actions CI run `#310`:
 
-- DB, private R2, and Images binding readiness
-- derivative policy, widths, required/optional formats, and AVIF cap
-- original public delivery disabled
-- approval and ready-derivative public gates
-- orientation normalization and generated-byte metadata verification
-- deterministic keys, idempotent leases, checksum regeneration, and cleanup lifecycle
+- checkout and Node.js 24 setup;
+- locked dependency installation;
+- project/security/publication validation;
+- operational script validation;
+- all nine local D1 migrations;
+- D1-free Worker build;
+- D1 Worker build.
 
-The guarded activation workflow rejects media activation unless these capabilities and mandatory JPEG/WebP fallback formats are present. It still requires explicit activation inputs and does not create accounts, upload media, or make moderation decisions.
+After documentation/hardening updates, verify CI again on the exact current PR head before continuing.
 
-## Validation and operational evidence
+## Documentation
 
-Local implementation validation for this phase includes:
-
-```bash
-npm ci
-npm run validate
-node --check scripts/prepare-admin-bootstrap.mjs
-npm run build
-npm run build:d1
-npm run db:migrate:local
-```
-
-The local migration run applied all eight migrations only to Wrangler's local D1 state. The final GitHub PR head must have successful CI before this handoff is considered synchronized.
-
-Detailed acceptance and recovery documentation:
-
+- `README.md`
+- `docs/IMPLEMENTATION_STATUS.md`
+- `docs/CLOUDFLARE_SETUP.md`
+- `docs/D1_AUTH_SETUP.md`
 - `docs/MEDIA_PIPELINE.md`
 - `docs/MEDIA_DERIVATIVE_TEST_MATRIX.md`
 - `docs/MEDIA_DERIVATIVE_ROLLBACK.md`
 - `docs/RECIPE_EDITORIAL.md`
-- `docs/D1_AUTH_SETUP.md`
-- `docs/CLOUDFLARE_SETUP.md`
-- `docs/IMPLEMENTATION_STATUS.md`
+- `docs/RECIPE_PUBLICATION_WORKFLOW.md`
 
-## Remaining boundaries and recommended next work
+## Remaining boundaries and next recommended phase
 
-The code is complete for this phase, but controlled non-production runtime acceptance remains required with synthetic, non-personal fixtures. Outstanding work includes:
+1. Execute controlled non-production acceptance for media derivatives, submissions, revisions, scheduling, archive/restore, concurrency, and rollback.
+2. Add private change sets for contributor revisions of already published recipes. The live `published` row must remain unchanged until atomic editorial promotion.
+3. Add editor-authored content editing and snapshot restore.
+4. Add optional Cron/queue scheduling only after the manual processor and incident procedures are accepted.
+5. Add malware/semantic scanning and approved retention/legal policies.
+6. Add account lifecycle and synchronized kitchen/community features.
 
-1. Execute the complete orientation/metadata/format/race/cache/cleanup/rollback matrix in a controlled Cloudflare environment.
-2. Define operational sweeper/queue behavior for repeatedly failed cleanup jobs if synchronous retries are insufficient.
-3. Add malware/semantic content scanning and approved retention/legal policies.
-4. Add contributor edits to published recipes, editorial editing, scheduled publishing, archive restoration, and snapshot restore.
-5. Add account lifecycle interfaces and synchronized kitchen/community features.
+Published-recipe revisions are not yet implemented. Do not reuse the owner-only requested-change `draft` state to mutate a live published row.
 
 ## Continuation rules
 
-1. Use the connected GitHub repository, not memory alone.
-2. Fetch PR `#1` and verify the current branch head before writing.
+1. Use connected GitHub data, not memory alone.
+2. Fetch PR `#1` and verify the current head before writing.
 3. Fetch the current blob SHA immediately before every existing-file update.
-4. Do not make no-op GitHub file updates.
-5. Never update the same path concurrently.
-6. Keep all four checked-in flags false.
-7. Do not deploy, activate D1, provision accounts, upload real media, create/publish recipes, moderate content, merge, or change production unless explicitly requested.
-8. Preserve ownership checks, approval-gated derivative delivery, private no-store previews, public `published`-only recipe reads, and optimistic/atomic D1 safety.
-9. Run and verify CI on the final head.
-10. Update the exact final head and successful CI evidence in the status/handoff documentation when a future phase completes.
+4. Do not make no-op updates or update one path concurrently.
+5. Keep all four checked-in flags false.
+6. Do not deploy, activate D1, provision accounts, upload media, create/schedule/publish recipes, moderate, restore real content, merge, or change production unless explicitly requested.
+7. Preserve ownership, approved derivative delivery, private no-store previews, published-only public reads, checksums/ETags, generation leases, schedule revisions, optimistic locking, and atomic D1 safety.
+8. Run and verify CI on the final head.
 
 ## Ready-to-paste continuation prompt
 
@@ -220,11 +255,9 @@ Repository: rahmatullahboss/Recipe
 Branch: feat/cloudflare-recipe-foundation
 Pull request: #1
 
-First fetch the current PR metadata and branch head, then read README.md and every file under docs/ referenced by docs/PROJECT_HANDOFF.md. Do not rely on an old SHA.
+Fetch the current PR head and current file blob SHAs before writing. Read README.md and every document referenced by docs/PROJECT_HANDOFF.md.
 
-The project includes Astro 7/Cloudflare international discovery, D1-free fallback data, cooking/planning/offline tools, guarded authentication, private R2 originals, privacy-safe responsive JPEG/WebP/optional AVIF derivatives, approval-gated derivative-only public delivery, atomic recipe submission/editorial publication, requested changes, owner-only race-safe resubmission, separate revisions, guarded relational replacement, and immutable snapshots through migration 0008.
+The project now includes Astro 7/Cloudflare international discovery, D1-free fallback data, cooking/planning/offline tools, guarded authentication, private R2 originals, privacy-safe responsive derivatives, approval-gated derivative-only delivery, atomic recipe submission, requested changes, owner-only race-safe resubmission, immutable snapshots, immediate publication, future UTC scheduling, guarded manual due processing, audit history, and archive restoration through migration 0009.
 
-Continue with controlled non-production derivative acceptance and the next product phase: published-recipe revisioning and scheduled publishing. Preserve all existing ownership, moderation, no-store preview, published-only read, checksum/ETag, lease, cleanup, optimistic revision, and atomic D1 guarantees.
-
-Recheck blob SHAs before each file update, keep all four checked-in flags false, do not deploy/activate/provision/upload/moderate/publish/merge/change production, and verify CI on the final head.
+Continue with controlled runtime acceptance and private change sets for contributor revisions of already published recipes. Preserve the live published row until atomic promotion. Keep all checked-in flags false; do not deploy, activate, provision, upload, moderate, schedule/publish real content, merge, or change production. Verify CI on the final head.
 ```
