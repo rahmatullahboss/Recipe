@@ -1,7 +1,11 @@
 import type { APIRoute } from "astro";
 import { CSRF_COOKIE, consumeRateLimit, isSameOriginRequest, validateCsrfToken } from "../../../lib/auth";
 import { validateRecipeDraft } from "../../../lib/recipe-draft";
-import { getRecipeSubmissionReadiness } from "../../../lib/recipe-submissions";
+import {
+  RecipeSubmissionError,
+  getRecipeSubmissionReadiness,
+  submitRecipeForReview,
+} from "../../../lib/recipe-submissions";
 
 const MAX_BODY_BYTES = 100_000;
 
@@ -41,5 +45,16 @@ export const POST: APIRoute = async ({ request, cookies, locals }) => {
 
   const validation = validateRecipeDraft(input.draft);
   if (!validation.valid || !validation.draft) return json({ ok: false, errors: validation.errors }, 422);
-  return json({ ok: false, error: "Recipe submission storage is pending." }, 503);
+
+  try {
+    const submission = await submitRecipeForReview(locals.user.id, validation.draft);
+    return json({ ok: true, submission, submissionsUrl: "/account/submissions" }, 201);
+  } catch (error) {
+    if (error instanceof RecipeSubmissionError) {
+      const status = error.code === "invalid" ? 422 : error.code === "conflict" ? 409 : error.code === "forbidden" ? 403 : 503;
+      return json({ ok: false, error: error.message }, status);
+    }
+    console.error("Recipe submission failed.", error);
+    return json({ ok: false, error: "Recipe submission is temporarily unavailable." }, 503);
+  }
 };
