@@ -75,8 +75,13 @@ Open **Settings → Actions → General** and confirm:
 - Actions are allowed for the repository.
 - Actions from GitHub and verified creators are allowed.
 - Workflow permissions have at least read access to repository contents.
+- The account or organisation has available Actions minutes and no billing-related Actions restriction.
 
 The workflows request their own minimal permissions.
+
+### Current repository warning
+
+At the time this foundation was prepared, GitHub was marking workflow jobs as failed before creating any workflow step or downloadable log. If that continues, check repository Actions permissions, account or organisation Actions policy, available Actions minutes, and billing status before investigating application code. A normal build failure should show checkout, install, or build steps with logs.
 
 ## 6. Current automatic deployment
 
