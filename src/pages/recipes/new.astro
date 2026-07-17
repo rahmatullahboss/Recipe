@@ -1,24 +1,206 @@
 ---
 import BaseLayout from "../../layouts/BaseLayout.astro";
+import { listCategories } from "../../lib/db";
+import { markets, resolveMarket } from "../../lib/market";
+import { supportedRecipeLanguages } from "../../lib/recipe-draft";
+
+const market = resolveMarket(Astro.request, Astro.url);
+const categories = await listCategories(100);
+const languageLabels: Record<string, string> = {
+  en: "English",
+  fr: "French",
+  de: "German",
+  sv: "Swedish",
+  nl: "Dutch",
+};
 ---
 
 <BaseLayout
-  title="Add a Recipe — Ozzyl Recipes"
-  description="Publish a regional recipe for the international Ozzyl Recipes community."
+  title="Create a Recipe Draft — Ozzyl Recipes"
+  description="Create and validate an international recipe draft in your browser."
   robots="noindex,nofollow"
 >
-  <section class="section">
-    <div class="container" style="max-width:760px">
-      <div class="recipe-panel">
-        <p class="eyebrow">International contributor publishing</p>
-        <h1 class="section-title">Add a regional recipe</h1>
-        <p class="section-copy">The publishing route is ready for the next phase: authenticated drafts, country and language selection, US or metric measurements, ingredient and direction editors, nutrition fields, moderation, Turnstile, and signed R2 image uploads.</p>
-        <p class="section-copy">Every published recipe will retain its country and cuisine identity while remaining discoverable across the global catalogue.</p>
-        <div class="filter-actions">
-          <a class="button" href="/categories">Review the taxonomy</a>
-          <a class="button button--ghost" href="/search">Explore published recipes</a>
-        </div>
-      </div>
+  <section class="section section--soft">
+    <div class="container">
+      <p class="eyebrow">Contributor workspace</p>
+      <h1 class="section-title">Create a regional recipe draft</h1>
+      <p class="section-copy">Your work autosaves only in this browser. The Cloudflare Worker validates the same structured payload that will later be stored in D1 and connected to R2 media uploads.</p>
     </div>
   </section>
+
+  <section class="section" data-recipe-editor>
+    <div class="container editor-shell">
+      <form class="editor-form" novalidate>
+        <div class="editor-section">
+          <div class="editor-section__heading">
+            <div>
+              <h2>Recipe identity</h2>
+              <p>Write clear, original copy suitable for an international audience.</p>
+            </div>
+            <span class="editor-status" data-draft-status>Preparing local draft…</span>
+          </div>
+
+          <div class="editor-grid">
+            <label class="editor-field editor-field--full">
+              <span>Recipe title</span>
+              <input name="title" type="text" maxlength="120" placeholder="Example: French-style roast chicken" autocomplete="off" />
+              <small class="editor-help">5–120 characters.</small>
+            </label>
+
+            <label class="editor-field editor-field--full">
+              <span>Short summary</span>
+              <textarea name="summary" maxlength="240" placeholder="Describe the result, flavour, and why someone should cook it."></textarea>
+              <small class="editor-help">20–240 characters; used on recipe cards and search results.</small>
+            </label>
+
+            <label class="editor-field editor-field--full">
+              <span>Full introduction</span>
+              <textarea name="description" maxlength="5000" placeholder="Add useful context, technique notes, serving ideas, and regional background."></textarea>
+            </label>
+          </div>
+        </div>
+
+        <div class="editor-section">
+          <div class="editor-section__heading">
+            <div>
+              <h2>Market and classification</h2>
+              <p>Country and cuisine metadata control personalisation and international discovery.</p>
+            </div>
+          </div>
+
+          <div class="editor-grid editor-grid--four">
+            <label class="editor-field">
+              <span>Country or market</span>
+              <select name="countryCode">
+                {markets.map((option) => (
+                  <option value={option.code} selected={option.code === market.code}>{option.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <label class="editor-field">
+              <span>Language</span>
+              <select name="languageCode">
+                {supportedRecipeLanguages.map((code) => (
+                  <option value={code} selected={code === "en"}>{languageLabels[code]}</option>
+                ))}
+              </select>
+            </label>
+
+            <label class="editor-field">
+              <span>Measurements</span>
+              <select name="measurementSystem">
+                <option value="us" selected={market.measurementSystem === "us"}>US customary</option>
+                <option value="metric" selected={market.measurementSystem === "metric"}>Metric</option>
+              </select>
+            </label>
+
+            <label class="editor-field">
+              <span>Difficulty</span>
+              <select name="difficulty">
+                <option value="easy">Easy</option>
+                <option value="medium">Medium</option>
+                <option value="hard">Hard</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="recipe-control-group" style="margin-top:20px">
+            <span class="recipe-control-label">Categories and cuisines</span>
+            <div class="category-checks">
+              {categories.map((category) => (
+                <label class="category-check">
+                  <input type="checkbox" name="categories" value={category.slug} />
+                  <span>{category.name}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div class="editor-section">
+          <div class="editor-section__heading">
+            <div>
+              <h2>Timing and yield</h2>
+              <p>Use realistic active and cooking times.</p>
+            </div>
+          </div>
+
+          <div class="editor-grid editor-grid--four">
+            <label class="editor-field">
+              <span>Prep minutes</span>
+              <input name="prepMinutes" type="number" min="0" max="1440" step="1" value="15" />
+            </label>
+            <label class="editor-field">
+              <span>Cook minutes</span>
+              <input name="cookMinutes" type="number" min="0" max="4320" step="1" value="30" />
+            </label>
+            <label class="editor-field">
+              <span>Servings</span>
+              <input name="servings" type="number" min="1" max="200" step="1" value="4" />
+            </label>
+          </div>
+        </div>
+
+        <div class="editor-section">
+          <div class="editor-section__heading">
+            <div>
+              <h2>Ingredients</h2>
+              <p>Add a clear item, amount, unit, and optional preparation note.</p>
+            </div>
+            <button class="recipe-tool-button" type="button" data-add-ingredient>Add ingredient</button>
+          </div>
+          <div class="repeating-list" data-ingredient-rows></div>
+        </div>
+
+        <div class="editor-section">
+          <div class="editor-section__heading">
+            <div>
+              <h2>Directions</h2>
+              <p>Write complete steps in the order they should be performed.</p>
+            </div>
+            <button class="recipe-tool-button" type="button" data-add-step>Add step</button>
+          </div>
+          <div class="repeating-list" data-step-rows></div>
+        </div>
+
+        <div class="validation-errors" data-validation-errors hidden></div>
+
+        <div class="editor-actions">
+          <button class="button" type="submit" data-validate-draft>Validate draft</button>
+          <button class="recipe-tool-button" type="button" data-export-draft>Export JSON</button>
+          <button class="recipe-tool-button" type="button" data-clear-draft>Clear local draft</button>
+        </div>
+      </form>
+
+      <aside class="editor-preview" aria-label="Recipe draft preview">
+        <div class="editor-preview__image">Recipe photo preview</div>
+        <p class="eyebrow">Live draft preview</p>
+        <h2 data-preview-title>Untitled regional recipe</h2>
+        <p data-preview-summary>Your recipe summary will appear here.</p>
+        <p class="editor-preview__meta" data-preview-meta>{market.code} · 45 min · 4 servings · easy</p>
+        <p class="conversion-note">Images are deliberately not stored locally. Signed R2 uploads and moderation will be connected after authentication.</p>
+      </aside>
+
+      <template data-ingredient-template>
+        <div class="ingredient-row" data-ingredient-row>
+          <input name="ingredient-item" type="text" maxlength="120" placeholder="Ingredient" aria-label="Ingredient name" />
+          <input name="ingredient-amount" type="text" maxlength="32" placeholder="Amount" aria-label="Ingredient amount" />
+          <input name="ingredient-unit" type="text" maxlength="32" placeholder="Unit" aria-label="Ingredient unit" />
+          <input name="ingredient-note" type="text" maxlength="160" placeholder="Optional note" aria-label="Ingredient note" />
+          <button class="remove-row-button" type="button" data-remove-ingredient aria-label="Remove ingredient">×</button>
+        </div>
+      </template>
+
+      <template data-step-template>
+        <div class="step-row" data-step-row>
+          <textarea name="step-instruction" maxlength="1000" placeholder="Describe this step clearly." aria-label="Step instruction"></textarea>
+          <input name="step-timer" type="number" min="0" max="1440" step="1" placeholder="Timer min" aria-label="Optional timer in minutes" />
+          <button class="remove-row-button" type="button" data-remove-step aria-label="Remove step">×</button>
+        </div>
+      </template>
+    </div>
+  </section>
+
+  <script src="/scripts/recipe-editor.js" defer></script>
 </BaseLayout>
