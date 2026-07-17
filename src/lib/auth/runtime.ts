@@ -16,6 +16,7 @@ export type AuthRuntimeStatus = {
   hasDatabase: boolean;
   hasSessionStore: boolean;
   hasPasswordPepper: boolean;
+  hasFingerprintPepper: boolean;
   hasTurnstileSiteKey: boolean;
   hasTurnstileSecret: boolean;
   missing: string[];
@@ -32,6 +33,7 @@ export function getAuthRuntimeStatus(): AuthRuntimeStatus {
   const hasDatabase = Boolean(bindings.DB);
   const hasSessionStore = Boolean(bindings.SESSION);
   const hasPasswordPepper = Boolean(bindings.AUTH_PASSWORD_PEPPER?.trim());
+  const hasFingerprintPepper = Boolean(bindings.AUTH_FINGERPRINT_PEPPER?.trim());
   const hasTurnstileSiteKey = Boolean(bindings.TURNSTILE_SITE_KEY?.trim());
   const hasTurnstileSecret = Boolean(bindings.TURNSTILE_SECRET_KEY?.trim());
   const missing: string[] = [];
@@ -40,6 +42,7 @@ export function getAuthRuntimeStatus(): AuthRuntimeStatus {
   if (!hasDatabase) missing.push("DB");
   if (!hasSessionStore) missing.push("SESSION");
   if (!hasPasswordPepper) missing.push("AUTH_PASSWORD_PEPPER");
+  if (!hasFingerprintPepper) missing.push("AUTH_FINGERPRINT_PEPPER");
   if (!hasTurnstileSiteKey) missing.push("TURNSTILE_SITE_KEY");
   if (!hasTurnstileSecret) missing.push("TURNSTILE_SECRET_KEY");
 
@@ -49,6 +52,7 @@ export function getAuthRuntimeStatus(): AuthRuntimeStatus {
     hasDatabase,
     hasSessionStore,
     hasPasswordPepper,
+    hasFingerprintPepper,
     hasTurnstileSiteKey,
     hasTurnstileSecret,
     missing,
