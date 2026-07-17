@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import type { RecipeDraft } from "./recipe-draft";
 import { getRecipeSubmissionReadiness, RecipeSubmissionError } from "./recipe-submissions";
+import { MEDIA_DERIVATIVE_POLICY_VERSION, mediaDeliveryUrl } from "./media-policy";
 
 type RevisionBindings = { DB?: D1Database };
 type CategoryRow = { id: string; slug: string };
@@ -9,6 +10,7 @@ type MediaRow = {
   owner_id: string;
   r2_key: string;
   moderation_status: string;
+  sha256: string;
 };
 
 type EditableRecipeRow = {
@@ -33,6 +35,7 @@ type EditableRecipeRow = {
   media_upload_status: string | null;
   media_moderation_status: string | null;
   media_r2_key: string | null;
+  media_sha256: string | null;
   media_alt_text: string | null;
 };
 
@@ -87,13 +90,23 @@ async function resolveOwnedHeroMedia(
   recipeId: string,
 ): Promise<MediaRow> {
   const media = await database.prepare(
-    `SELECT m.id, m.owner_id, m.r2_key, m.moderation_status
+    `SELECT m.id, m.owner_id, m.r2_key, m.moderation_status, m.sha256
      FROM media_assets m
      WHERE m.id = ?
        AND m.owner_id = ?
        AND m.upload_status = 'uploaded'
        AND m.purpose = 'recipe_hero'
        AND m.moderation_status IN ('pending', 'approved')
+       AND m.sha256 IS NOT NULL
+       AND EXISTS (
+         SELECT 1 FROM media_derivative_jobs j
+         WHERE j.media_id = m.id
+           AND j.status = 'ready'
+           AND j.policy_version = '${MEDIA_DERIVATIVE_POLICY_VERSION}'
+           AND j.source_sha256 = m.sha256
+           AND j.required_variant_count > 0
+           AND j.ready_variant_count >= j.required_variant_count
+       )
        AND NOT EXISTS (
          SELECT 1 FROM recipes assigned
          WHERE assigned.media_asset_id = m.id AND assigned.id <> ?
@@ -104,7 +117,7 @@ async function resolveOwnedHeroMedia(
   if (!media) {
     throw new RecipeSubmissionError(
       "invalid",
-      "Attach an uploaded recipe image that you own and that is not rejected, quarantined, or assigned to another recipe.",
+      "Attach an uploaded recipe image that you own, has complete privacy-safe derivatives, and is not rejected, quarantined, or assigned to another recipe.",
     );
   }
   return media;
@@ -203,6 +216,7 @@ export async function getContributorEditableSubmission(userId: string, recipeId:
   const reusableMedia = recipe.media_asset_id
     && recipe.media_upload_status === "uploaded"
     && (recipe.media_moderation_status === "pending" || recipe.media_moderation_status === "approved")
+    && recipe.media_sha256
     ? recipe.media_asset_id
     : null;
 
@@ -213,11 +227,11 @@ export async function getContributorEditableSubmission(userId: string, recipeId:
     changeReason: recipe.editorial_reason,
     changeRequestedAt: recipe.change_requested_at,
     draft: toDraft(recipe, content, reusableMedia),
-    media: reusableMedia && recipe.media_r2_key ? {
+    media: reusableMedia && recipe.media_r2_key && recipe.media_sha256 ? {
       id: reusableMedia,
       altText: recipe.media_alt_text,
       moderationStatus: recipe.media_moderation_status,
-      previewUrl: `/media/${recipe.media_r2_key}?preview=1`,
+      previewUrl: mediaDeliveryUrl(recipe.media_r2_key, recipe.media_sha256, true),
     } : null,
     mediaReplacementRequired: Boolean(recipe.media_asset_id && !reusableMedia),
     snapshots: snapshotsResult.results ?? [],
@@ -382,7 +396,7 @@ export async function resubmitRecipeRevision(input: {
 
   const writeToken = `recipe_write_${crypto.randomUUID()}`;
   const note = cleanNote(input.note) ?? "Resubmitted after requested changes.";
-  const imageUrl = `/media/${media.r2_key}`;
+  const imageUrl = mediaDeliveryUrl(media.r2_key, media.sha256);
   const nextContentRevision = current.content_revision + 1;
   const statements: D1PreparedStatement[] = [
     database.prepare(

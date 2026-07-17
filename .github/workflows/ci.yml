@@ -35,5 +35,11 @@ jobs:
       - name: Validate operational scripts
         run: node --check scripts/prepare-admin-bootstrap.mjs
 
-      - name: Generate Cloudflare types and build Astro Worker
+      - name: Apply authoritative migrations locally
+        run: npm run db:migrate:local
+
+      - name: Generate Cloudflare types and build D1-free Astro Worker
         run: npm run build
+
+      - name: Generate Cloudflare types and build D1 Astro Worker
+        run: npm run build:d1

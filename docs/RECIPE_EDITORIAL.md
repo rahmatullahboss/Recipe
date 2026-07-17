@@ -25,7 +25,7 @@ The D1-free public application and browser-local new-recipe editor continue to w
 
 ## Activation dependencies
 
-Recipe submissions and revisions become ready only when authentication, D1, R2 storage, moderated uploads, migrations `0006_recipe_editorial` and `0007_recipe_revisions`, and `RECIPE_SUBMISSIONS_ENABLED=true` are all ready.
+Recipe submissions and revisions become ready only when authentication, D1, private R2 storage, the Cloudflare Images binding, moderated derivative-capable uploads, migrations through `0008_media_derivatives`, and `RECIPE_SUBMISSIONS_ENABLED=true` are all ready.
 
 The guarded **Enable Authentication** workflow rejects recipe activation when moderated media uploads are not also enabled. Deployment verification checks recipe readiness plus optimistic locking, requested changes, contributor revisions, and immutable snapshots.
 
@@ -166,14 +166,16 @@ Snapshots are private and are not exposed by public recipe queries.
 
 ## Separate media and recipe approval
 
-Media moderation and recipe review are separate decisions. A pending hero image may enter private recipe review, but publication requires:
+Media moderation and recipe review are separate decisions. A pending hero image with private derivatives may enter private recipe review, but publication requires:
 
 ```text
 upload_status = uploaded
 moderation_status = approved
+current derivative policy = recipe-images-v1
+mandatory JPEG/WebP derivative matrix = ready
 ```
 
-Editors inspect media at `/admin/media` and recipes at `/admin/recipes`.
+Media approval itself is blocked until the current-policy required matrix is ready. Editors inspect media at `/admin/media` and recipes at `/admin/recipes`. Neither private originals nor unapproved derivatives are exposed through public recipe reads.
 
 ## Publication and archival
 
@@ -184,9 +186,10 @@ Publishing requires:
 - at least two ingredients;
 - at least two directions;
 - at least one category;
-- attached uploaded and approved hero media.
+- attached uploaded and approved hero media;
+- a ready current-policy derivative job with every mandatory JPEG/WebP variant.
 
-The final conditional D1 update checks approved media again. A concurrent recipe revision or media moderation change returns conflict instead of publishing stale content.
+The final conditional D1 update rechecks media approval, source checksum, derivative policy, and complete required-variant counts. A concurrent recipe revision, source replacement, derivative cleanup, or media moderation change returns conflict instead of publishing stale content.
 
 Archiving a review submission requires a clear editorial reason. Archived recipes are not public and cannot be edited by the contributor revision endpoint.
 
@@ -217,7 +220,8 @@ Middleware applies `private, no-store` to these routes. Robots rules disallow ac
 
 `/api/health` exposes non-secret recipe readiness and these capability booleans:
 
-- publication requires approved media;
+- publication requires approved media and a complete current-policy mandatory derivative matrix;
+- privacy-safe derivative readiness and private-original denial;
 - optimistic locking;
 - requested changes;
 - contributor revisions;

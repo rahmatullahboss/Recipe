@@ -37,6 +37,7 @@ async function validateMigrations() {
     "0005_media_pipeline",
     "0006_recipe_editorial",
     "0007_recipe_revisions",
+    "0008_media_derivatives",
   ];
   const actual = (await readdir(directory, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory())
@@ -66,12 +67,42 @@ async function validateMigrations() {
   for (const token of ["content_revision", "change_requested_at", "revision_write_token", "recipe_revision_snapshots", "initial_submission", "resubmission"]) {
     assert(sql.get("0007_recipe_revisions")?.includes(token), `Recipe revision migration is missing ${token}.`);
   }
+  for (const token of [
+    "media_derivative_jobs",
+    "media_derivatives",
+    "source_orientation",
+    "normalized_width",
+    "generation_token",
+    "policy_version",
+    "source_sha256",
+    "cleanup_pending",
+    "media_assets_derivatives_regenerate_after_source_change",
+  ]) {
+    assert(sql.get("0008_media_derivatives")?.includes(token), `Media derivative migration is missing ${token}.`);
+  }
 
   const wrangler = await readFile(path.join(root, "wrangler.d1.jsonc"), "utf8");
   assert(wrangler.includes('"migrations_pattern": "migrations/d1/*/migration.sql"'), "Wrangler migration pattern changed.");
   assert(wrangler.includes('"AUTH_ENABLED": "false"'), "Authentication must remain disabled by default.");
+  assert(wrangler.includes('"AUTH_REGISTRATION_ENABLED": "false"'), "Authentication registration must remain disabled by default.");
   assert(wrangler.includes('"MEDIA_UPLOADS_ENABLED": "false"'), "Media uploads must remain disabled by default.");
   assert(wrangler.includes('"RECIPE_SUBMISSIONS_ENABLED": "false"'), "Recipe submissions must remain disabled by default.");
+
+  const ci = await readFile(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
+  assert(ci.includes("npm run db:migrate:local"), "CI must execute the authoritative migration chain locally.");
+  assert(ci.includes("npm run build\n"), "CI must build the D1-free Worker.");
+  assert(ci.includes("npm run build:d1"), "CI must build the D1 Worker.");
+
+  const activation = await readFile(path.join(root, ".github", "workflows", "enable-auth.yml"), "utf8");
+  for (const token of [
+    "Cloudflare Images binding is not ready",
+    "unexpected media derivative policy",
+    "private originals could be publicly delivered",
+    "ready derivative delivery gate is unavailable",
+    "required JPEG/WebP fallback matrix is unavailable",
+  ]) {
+    assert(activation.includes(token), `Guarded activation derivative capability check is missing: ${token}.`);
+  }
 }
 
 async function validateSecurityFoundations() {
@@ -81,17 +112,56 @@ async function validateSecurityFoundations() {
   }
 
   const media = await readFile(path.join(root, "src", "lib", "media.ts"), "utf8");
-  for (const token of ["MAX_MEDIA_BYTES = 8 * 1024 * 1024", "parsePng", "parseJpeg", "parseWebp", "claimUploadIntent"]) {
+  for (const token of [
+    "MAX_MEDIA_BYTES = 8 * 1024 * 1024",
+    "parsePng",
+    "parseJpeg",
+    "parseWebp",
+    "parseJpegOrientation",
+    "parsePngOrientation",
+    "parseWebpOrientation",
+    "normalisedDimensions",
+    "source_orientation",
+    "media_derivative_jobs",
+    "claimUploadIntent",
+  ]) {
     assert(media.includes(token), `Media invariant is missing: ${token}.`);
   }
   assert(!media.includes('"image/svg+xml"'), "SVG uploads must remain disabled.");
 
+  const derivatives = await readFile(path.join(root, "src", "lib", "media-derivatives.ts"), "utf8");
+  for (const token of [
+    "MEDIA_DERIVATIVE_POLICY_VERSION",
+    "generation_token",
+    "lock_expires_at",
+    "Private original checksum does not match D1",
+    "assertJpegMetadataStripped",
+    "assertWebpMetadataStripped",
+    "assertAvifMetadataStripped",
+    '"image/avif"',
+    '"jpeg", "webp", "avif"',
+    "cleanupMediaDerivatives",
+    "findReadyMediaDerivative",
+    "await bucket.delete(key)",
+  ]) {
+    assert(derivatives.includes(token), `Derivative invariant is missing: ${token}.`);
+  }
+
   const delivery = await readFile(path.join(root, "src", "pages", "media", "[...key].ts"), "utf8");
   assert(delivery.includes('moderation_status === "approved"'), "Public media delivery must require approval.");
+  assert(delivery.includes("findReadyMediaDerivative"), "Public media delivery must use approved derivatives.");
+  assert(delivery.includes("media.get(derivative.r2_key)"), "Media delivery must fetch only derivative objects.");
+  assert(!delivery.includes("media.get(key)"), "Public media delivery must never fetch original objects.");
   assert(delivery.includes('"private, no-store"'), "Private media previews must not be cached.");
+  assert(delivery.includes("mediaDerivativeCacheToken"), "Public derivative URLs must be policy and checksum versioned.");
+  assert(delivery.includes("X-Content-SHA256"), "Derivative checksum response metadata is missing.");
 
   const editorial = await readFile(path.join(root, "src", "lib", "recipe-submissions.ts"), "utf8");
   for (const token of [
+    "MEDIA_DERIVATIVE_POLICY_VERSION",
+    "derivative_ready",
+    "media_derivative_jobs",
+    "ready_variant_count >= j.required_variant_count",
     "RECIPE_SUBMISSIONS_ENABLED",
     "database.batch(statements)",
     "resolveOwnedHeroMedia",
@@ -112,6 +182,9 @@ async function validateSecurityFoundations() {
     "content_revision = content_revision + 1",
     "database.batch(statements)",
     "assigned.id <> ?",
+    "MEDIA_DERIVATIVE_POLICY_VERSION",
+    "media_derivative_jobs",
+    "mediaDeliveryUrl",
   ]) {
     assert(revisions.includes(token), `Recipe revision invariant is missing: ${token}.`);
   }
@@ -131,6 +204,36 @@ async function validateSecurityFoundations() {
   assert(editorialRoute.includes('validateCsrfToken("recipe-editorial"'), "Recipe editorial CSRF check is missing.");
   assert(editorialRoute.includes('locals.user.role !== "editor"'), "Recipe editorial role check is missing.");
   assert(editorialRoute.includes('action !== "request_changes"'), "Recipe requested-changes action is missing.");
+
+  const moderation = await readFile(path.join(root, "src", "lib", "media-moderation.ts"), "utf8");
+  for (const token of ["media_derivative_jobs", "required_variant_count", "ready_variant_count", "MEDIA_DERIVATIVE_POLICY_VERSION"]) {
+    assert(moderation.includes(token), `Media approval derivative gate is missing: ${token}.`);
+  }
+
+  const upload = await readFile(path.join(root, "src", "pages", "api", "media", "upload.ts"), "utf8");
+  assert(upload.includes("generateMediaDerivatives"), "Media upload must start derivative generation after the original is committed.");
+  assert(upload.includes('derivativeStatus: "failed"'), "Derivative upload failure must keep the private original without publishing it.");
+
+  const derivativeRoute = await readFile(path.join(root, "src", "pages", "api", "media", "[id]", "derivatives.ts"), "utf8");
+  assert(derivativeRoute.includes('validateCsrfToken("media-derivatives"'), "Derivative regeneration CSRF check is missing.");
+  assert(derivativeRoute.includes("asset.owner_id !== locals.user.id"), "Derivative regeneration ownership gate is missing.");
+
+  const deleteRoute = await readFile(path.join(root, "src", "pages", "api", "media", "[id].ts"), "utf8");
+  assert(deleteRoute.includes('validateCsrfToken("media-delete"'), "Media deletion CSRF check is missing.");
+  assert(deleteRoute.includes("SELECT id FROM recipes WHERE media_asset_id"), "Media deletion must refuse assigned originals.");
+  assert(deleteRoute.includes("deleteOriginal: true"), "Media deletion must clean the private original after D1 denial.");
+
+  const health = await readFile(path.join(root, "src", "pages", "api", "health.ts"), "utf8");
+  for (const token of [
+    "derivativePolicyVersion",
+    "transformationsReady",
+    "originalPublicDelivery",
+    "publicDeliveryRequiresReadyDerivatives",
+    "metadataStrippingVerified",
+    "idempotentLocks",
+  ]) {
+    assert(health.includes(token), `Derivative health capability is missing: ${token}.`);
+  }
 }
 
 async function validateBrowserScripts() {
@@ -155,4 +258,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, seven D1 migrations, guarded authentication, media, recipe editorial and contributor revision invariants, and browser scripts.`);
+console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, eight D1 migrations, guarded authentication, privacy-safe media derivatives, recipe editorial and contributor revision invariants, and browser scripts.`);

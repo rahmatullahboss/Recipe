@@ -2,6 +2,7 @@ import type { APIRoute } from "astro";
 import { CSRF_COOKIE, isSameOriginRequest, validateCsrfToken } from "../../../../lib/auth";
 import type { MediaModerationStatus } from "../../../../lib/media";
 import { applyMediaModeration } from "../../../../lib/media-moderation";
+import { cleanupMediaDerivatives, generateMediaDerivatives } from "../../../../lib/media-derivatives";
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, {
@@ -54,8 +55,32 @@ export const POST: APIRoute = async ({ request, cookies, locals, params }) => {
       nextStatus: status as MediaModerationStatus,
       reason: reason || undefined,
     });
-    if (!updated) return json({ ok: false, error: "Media asset was not found, already had that status, or changed concurrently." }, 409);
-    return json({ ok: true, mediaId, moderationStatus: status });
+    if (!updated) {
+      const detail = status === "approved"
+        ? "Media approval requires a complete current-policy JPEG/WebP derivative matrix and no concurrent change."
+        : "Media asset was not found, already had that status, or changed concurrently.";
+      return json({ ok: false, error: detail }, 409);
+    }
+
+    if (status === "rejected" || status === "quarantined") {
+      try {
+        const cleanup = await cleanupMediaDerivatives(mediaId);
+        return json({ ok: true, mediaId, moderationStatus: status, cleanedDerivatives: cleanup.cleaned });
+      } catch (error) {
+        console.error("Moderation succeeded but derivative cleanup is pending.", error);
+        return json({ ok: true, mediaId, moderationStatus: status, cleanupPending: true }, 202);
+      }
+    }
+    if (status === "pending") {
+      try {
+        const derivatives = await generateMediaDerivatives(mediaId);
+        return json({ ok: true, mediaId, moderationStatus: status, derivativeStatus: derivatives.status });
+      } catch (error) {
+        console.error("Derivative regeneration after returning media to pending failed.", error);
+        return json({ ok: true, mediaId, moderationStatus: status, derivativeStatus: "failed" }, 202);
+      }
+    }
+    return json({ ok: true, mediaId, moderationStatus: status, derivativeStatus: "ready" });
   } catch (error) {
     console.error("Media moderation failed.", error);
     return json({ ok: false, error: "Media moderation is temporarily unavailable." }, 503);

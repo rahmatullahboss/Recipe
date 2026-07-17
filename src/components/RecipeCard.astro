@@ -1,6 +1,7 @@
 ---
 import type { RecipeSummary } from "../lib/db";
 import { getMarket } from "../lib/market";
+import { mediaResponsiveSrcSet } from "../lib/media-policy";
 
 type Props = {
   recipe: RecipeSummary;
@@ -9,12 +10,16 @@ type Props = {
 const { recipe } = Astro.props;
 const totalMinutes = recipe.prep_minutes + recipe.cook_minutes;
 const recipeMarket = recipe.country_code === "GLOBAL" ? "International" : getMarket(recipe.country_code).name;
+const imageUrl = recipe.image_url ?? "/images/recipe-placeholder.svg";
+const imageSrcSet = mediaResponsiveSrcSet(imageUrl);
 ---
 
 <article class="recipe-card">
   <a class="recipe-card__image" href={`/recipes/${recipe.slug}`} aria-label={`View ${recipe.title}`}>
     <img
-      src={recipe.image_url ?? "/images/recipe-placeholder.svg"}
+      src={imageUrl}
+      srcset={imageSrcSet}
+      sizes="(max-width: 720px) 100vw, (max-width: 1100px) 50vw, 33vw"
       alt={recipe.title}
       loading="lazy"
       width="800"

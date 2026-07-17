@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { getAuthReadiness } from "./auth";
 import { getMediaReadiness } from "./media";
 import { getMediaRuntimeStatus } from "./media-runtime";
+import { MEDIA_DERIVATIVE_POLICY_VERSION, mediaDeliveryUrl } from "./media-policy";
 import type { RecipeDraft } from "./recipe-draft";
 
 export type EditorialRecipeStatus = "draft" | "review" | "published" | "archived";
@@ -30,6 +31,7 @@ type MediaRow = {
   upload_status: string;
   moderation_status: string;
   purpose: string;
+  sha256: string;
 };
 
 type PublicationCheckRow = {
@@ -38,6 +40,7 @@ type PublicationCheckRow = {
   revision: number;
   media_asset_id: string | null;
   media_status: string | null;
+  derivative_ready: number;
   ingredient_count: number;
   step_count: number;
   category_count: number;
@@ -79,7 +82,7 @@ export function getRecipeSubmissionReadiness(): RecipeSubmissionReadiness {
   if (!state.database) missing.push("D1 recipe database");
   if (!state.authentication) missing.push("ready authentication");
   if (!state.mediaUploads) missing.push("enabled media uploads");
-  if (!state.mediaStorage) missing.push("ready D1 and R2 media storage");
+  if (!state.mediaStorage) missing.push("ready D1, private R2, and Images media pipeline");
   return { ...state, ready: missing.length === 0, missing };
 }
 
@@ -115,20 +118,30 @@ async function resolveCategories(database: D1Database, slugs: string[]): Promise
 
 async function resolveOwnedHeroMedia(database: D1Database, userId: string, mediaAssetId: string): Promise<MediaRow> {
   const media = await database.prepare(
-    `SELECT m.id, m.owner_id, m.r2_key, m.upload_status, m.moderation_status, m.purpose
+    `SELECT m.id, m.owner_id, m.r2_key, m.upload_status, m.moderation_status, m.purpose, m.sha256
      FROM media_assets m
      WHERE m.id = ?
        AND m.owner_id = ?
        AND m.upload_status = 'uploaded'
        AND m.purpose = 'recipe_hero'
        AND m.moderation_status IN ('pending', 'approved')
+       AND m.sha256 IS NOT NULL
+       AND EXISTS (
+         SELECT 1 FROM media_derivative_jobs j
+         WHERE j.media_id = m.id
+           AND j.status = 'ready'
+           AND j.policy_version = '${MEDIA_DERIVATIVE_POLICY_VERSION}'
+           AND j.source_sha256 = m.sha256
+           AND j.required_variant_count > 0
+           AND j.ready_variant_count >= j.required_variant_count
+       )
        AND NOT EXISTS (SELECT 1 FROM recipes r WHERE r.media_asset_id = m.id)
      LIMIT 1`,
   ).bind(mediaAssetId, userId).first<MediaRow>();
   if (!media) {
     throw new RecipeSubmissionError(
       "invalid",
-      "Attach an uploaded recipe image that you own and that is not rejected, quarantined, or already assigned.",
+      "Attach an uploaded recipe image that you own, has complete privacy-safe derivatives, and is not rejected, quarantined, or already assigned.",
     );
   }
   return media;
@@ -188,7 +201,7 @@ export async function submitRecipeForReview(userId: string, draft: RecipeDraft) 
   const recipeUuid = crypto.randomUUID();
   const recipeId = `recipe_${recipeUuid}`;
   const slug = `${slugBase(draft.title)}-${recipeUuid.replaceAll("-", "").slice(0, 10)}`;
-  const imageUrl = `/media/${media.r2_key}`;
+  const imageUrl = mediaDeliveryUrl(media.r2_key, media.sha256);
 
   const statements: D1PreparedStatement[] = [
     database.prepare(
@@ -332,6 +345,15 @@ async function publicationCheck(database: D1Database, recipeId: string): Promise
   return database.prepare(
     `SELECT r.id, r.status, r.revision, r.media_asset_id,
             m.moderation_status AS media_status,
+            EXISTS (
+              SELECT 1 FROM media_derivative_jobs j
+              WHERE j.media_id = m.id
+                AND j.status = 'ready'
+                AND j.policy_version = '${MEDIA_DERIVATIVE_POLICY_VERSION}'
+                AND j.source_sha256 = m.sha256
+                AND j.required_variant_count > 0
+                AND j.ready_variant_count >= j.required_variant_count
+            ) AS derivative_ready,
             (SELECT COUNT(*) FROM recipe_ingredients ri WHERE ri.recipe_id = r.id) AS ingredient_count,
             (SELECT COUNT(*) FROM recipe_steps rs WHERE rs.recipe_id = r.id) AS step_count,
             (SELECT COUNT(*) FROM recipe_categories rc WHERE rc.recipe_id = r.id) AS category_count
@@ -361,8 +383,8 @@ export async function transitionRecipeEditorialStatus(input: {
     throw new RecipeSubmissionError("invalid", "Add a clear editorial reason before archiving the submission.");
   }
   if (input.action === "publish") {
-    if (!current.media_asset_id || current.media_status !== "approved") {
-      throw new RecipeSubmissionError("invalid", "Approve the attached hero image before publishing this recipe.");
+    if (!current.media_asset_id || current.media_status !== "approved" || current.derivative_ready !== 1) {
+      throw new RecipeSubmissionError("invalid", "Approve the attached hero image and complete its privacy-safe derivatives before publishing this recipe.");
     }
     if (current.ingredient_count < 2 || current.step_count < 2 || current.category_count < 1) {
       throw new RecipeSubmissionError("invalid", "Recipe content is incomplete and cannot be published.");
@@ -390,6 +412,15 @@ export async function transitionRecipeEditorialStatus(input: {
            WHERE m.id = recipes.media_asset_id
              AND m.upload_status = 'uploaded'
              AND m.moderation_status = 'approved'
+             AND EXISTS (
+               SELECT 1 FROM media_derivative_jobs j
+               WHERE j.media_id = m.id
+                 AND j.status = 'ready'
+                 AND j.policy_version = '${MEDIA_DERIVATIVE_POLICY_VERSION}'
+                 AND j.source_sha256 = m.sha256
+                 AND j.required_variant_count > 0
+                 AND j.ready_variant_count >= j.required_variant_count
+             )
          )
        )`,
   ).bind(

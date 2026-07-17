@@ -184,6 +184,17 @@ jobs:
             if (expectRegistration && health.authentication?.registrationReady !== true) failures.push("registration is not ready");
             if (health.media?.uploadsEnabled !== expectMediaUploads) failures.push("media upload flag does not match the workflow input");
             if (health.media?.storageReady !== true) failures.push("media storage is not ready");
+            if (health.media?.transformationsReady !== true) failures.push("Cloudflare Images binding is not ready");
+            if (health.media?.derivativePolicyVersion !== "recipe-images-v1") failures.push("unexpected media derivative policy");
+            if (health.media?.originalPublicDelivery !== false) failures.push("private originals could be publicly delivered");
+            if (health.media?.publicDeliveryRequiresApproval !== true) failures.push("media approval delivery gate is unavailable");
+            if (health.media?.publicDeliveryRequiresReadyDerivatives !== true) failures.push("ready derivative delivery gate is unavailable");
+            if (health.media?.orientationNormalization !== true) failures.push("orientation normalization capability is unavailable");
+            if (health.media?.metadataStrippingVerified !== true) failures.push("metadata stripping verification is unavailable");
+            if (health.media?.idempotentLocks !== true) failures.push("derivative generation locks are unavailable");
+            if (health.media?.checksumRegeneration !== true) failures.push("checksum regeneration capability is unavailable");
+            if (health.media?.cleanupLifecycle !== true) failures.push("media cleanup lifecycle is unavailable");
+            if (!Array.isArray(health.media?.requiredFormats) || !health.media.requiredFormats.includes("jpeg") || !health.media.requiredFormats.includes("webp")) failures.push("required JPEG/WebP fallback matrix is unavailable");
             if (expectMediaUploads && health.media?.ready !== true) failures.push("media uploads are not ready");
             if (health.recipeSubmissions?.enabled !== expectRecipeSubmissions) failures.push("recipe submission flag does not match the workflow input");
             if (expectRecipeSubmissions && health.recipeSubmissions?.ready !== true) failures.push("recipe submissions are not ready");

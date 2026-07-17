@@ -9,16 +9,16 @@ Read [`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md) for the authoritative continuati
 | International discovery and fallback catalogue | Complete for current milestone | Available in D1-free mode |
 | Search, cooking, planning, and offline tools | Complete for current milestone | Available in D1-free mode |
 | D1 authentication foundation | Complete in code | Disabled; dependencies and activation pending |
-| Moderated private R2 media | Complete in code except derivatives | Disabled; operational testing pending |
+| Moderated private R2 media | Complete in code | Disabled; operational testing pending |
 | Initial recipe submission | Complete in code | Disabled |
 | Editorial review and publication | Complete in code | Disabled |
 | Requested changes and owner resubmission | Complete in code | Disabled |
 | Immutable recipe revision snapshots | Complete in code | Disabled |
-| Privacy-safe image derivatives | Not implemented | Not available |
+| Privacy-safe image derivatives | Complete in code for `recipe-images-v1` | Disabled; synthetic/runtime acceptance pending |
 | Published-recipe revisioning and scheduled publishing | Not implemented | Not available |
 | Community/account synchronization and administration | Not implemented | Not available |
 
-The core public product and guarded account/media/submission/editorial/revision foundations are implemented. Production operationalization is intentionally not performed. The next recommended engineering phase is privacy-safe image derivatives.
+The core public product and guarded account/media/derivative/submission/editorial/revision foundations are implemented. Production operationalization is intentionally not performed. The next recommended phase is controlled non-production acceptance of the derivative matrix, followed by published-recipe revisioning and scheduled publishing.
 
 ## Completed
 
@@ -78,23 +78,28 @@ The core public product and guarded account/media/submission/editorial/revision 
 - Independent `AUTH_ENABLED` and `AUTH_REGISTRATION_ENABLED` flags
 - Non-secret readiness diagnostics
 
-### Guarded R2 media foundation
+### Guarded R2 media and privacy-safe derivatives
 
 - Independent `MEDIA_UPLOADS_ENABLED` flag, false by default
 - One-time D1 upload intents with token digests and expiry
-- Server-generated R2 object keys
+- Server-generated private original R2 keys
 - JPEG, PNG, and WebP allowlist; SVG disabled
-- 8 MB cap, raster signature checks, dimension limits, 40-megapixel cap, and raw SHA-256 checksums
-- Expected MIME and byte-size matching
-- Private originals and owner-only pending previews
-- Contributor asset listing and editor attachment
-- Editor/admin moderation queue at `/admin/media`
-- Pending, approved, rejected, and quarantined states
-- Required reasons for reject and quarantine
-- Trigger-backed moderation history
-- Anonymous delivery only for uploaded and approved assets
-- Private no-store previews and immutable approved delivery with ETags
-- Media readiness diagnostics and guarded activation workflow integration
+- 8 MiB cap, raster signature, MIME/size, dimensions, 40-megapixel and source SHA-256 checks
+- EXIF orientation parsing for JPEG, PNG and WebP with post-normalization minimum dimensions
+- Additive `0008_media_derivatives` schema with jobs, variants, policy/source identity, output checksums/ETags and cleanup triggers
+- `recipe-images-v1` bounded 320/640/960/1280 variants without upscaling
+- Required JPEG/WebP and optional exact-MIME AVIF through 960 px
+- Generated-byte metadata scans and normalized output-dimension checks
+- Deterministic R2 derivative keys and five-minute conditional D1 generation leases
+- Source ETag/checksum revalidation, no-op ready regeneration, editor force regeneration and stale-policy/source cleanup
+- Private originals never returned by delivery routes
+- Owner/editor private derivative previews with `private, no-store`
+- Approved-parent plus complete current-policy derivative gate for anonymous delivery
+- Canonical policy/checksum URL versions, `Accept` negotiation, immutable caches and response checksum/ETag guarantees
+- Editor/admin moderation queue with approval blocked until mandatory derivatives are ready
+- Rejection, quarantine and deletion cleanup; assigned media cannot be deleted
+- Guarded owner/editor regeneration and detach-before-delete routes
+- Detailed health capabilities, activation assertions, validator invariants, test matrix and rollback runbook
 
 ### Initial recipe submission
 
@@ -152,6 +157,7 @@ migrations/d1/0004_auth_accounts/migration.sql
 migrations/d1/0005_media_pipeline/migration.sql
 migrations/d1/0006_recipe_editorial/migration.sql
 migrations/d1/0007_recipe_revisions/migration.sql
+migrations/d1/0008_media_derivatives/migration.sql
 ```
 
 `migrations_pattern` restricts Wrangler to the nested sequence. Root SQL files are legacy references only.
@@ -159,9 +165,9 @@ migrations/d1/0007_recipe_revisions/migration.sql
 ### Operations, validation, privacy, and security
 
 - Pull-request CI on Node.js 24
-- Exact seven-stage migration validation
+- Exact eight-stage migration validation
 - Catalogue and market validation
-- Authentication, media, recipe-editorial, and contributor-revision invariants
+- Authentication, privacy-safe media derivative, recipe-editorial, and contributor-revision invariants
 - Browser JavaScript and service-worker syntax validation
 - Operational script validation
 - Cloudflare type generation and Astro Worker build
@@ -197,8 +203,8 @@ D1, accounts, contributor media, submissions, editorial decisions, and revisions
 
 ```text
 wrangler.d1.jsonc
-  → provision D1, KV, and R2
-  → apply seven migrations
+  → provision D1, KV, private R2, and Images binding
+  → apply eight migrations
   → deploy D1 reads with all trusted writes false
   → configure peppers, Turnstile, and optional email delivery
   → enable controlled sign-in
@@ -229,7 +235,7 @@ CI run `#290` passed all dependency, validation, operational-script, Cloudflare-
 2. Approve Terms and Privacy for the operating company and jurisdictions.
 3. Configure verification email provider/webhook and sender domain.
 4. Provision initial administrator/editor credentials through a controlled process.
-5. Implement privacy-safe image derivatives: EXIF/metadata stripping, orientation normalization, responsive WebP/AVIF variants, approved-only public delivery, regeneration, and cleanup.
+5. Execute controlled synthetic/runtime acceptance for `recipe-images-v1`, including EXIF orientation fixtures, metadata scans, format fallback, cache, race, cleanup and rollback tests.
 6. Add contributor edits to published recipes, editorial editing, scheduled publishing, archive restoration, snapshot restore, and richer conflict resolution.
 7. Add account-synchronized saves, shopping lists, meal plans, ratings, reviews, comments, and collections.
 8. Add password reset, email change, account deletion, and account-administration interfaces.

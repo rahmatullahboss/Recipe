@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { createRandomToken, sha256Base64Url } from "./auth";
+import { MEDIA_DERIVATIVE_POLICY_VERSION, mediaDeliveryUrl } from "./media-policy";
 
 export const MAX_MEDIA_BYTES = 8 * 1024 * 1024;
 export const MEDIA_INTENT_TTL_SECONDS = 10 * 60;
@@ -8,9 +9,10 @@ export const MEDIA_MODERATION_EVENT_TABLE = "media_moderation_events";
 export type MediaPurpose = "recipe_hero" | "recipe_step" | "avatar";
 export type MediaModerationStatus = "pending" | "approved" | "rejected" | "quarantined";
 
-type MediaBindings = {
+export type MediaBindings = {
   DB?: D1Database;
   MEDIA?: R2Bucket;
+  IMAGES?: ImagesBinding;
 };
 
 type UploadIntentRow = {
@@ -25,7 +27,7 @@ type UploadIntentRow = {
   expires_at: string;
 };
 
-type MediaAssetRow = {
+export type MediaAssetRow = {
   id: string;
   owner_id: string | null;
   r2_key: string;
@@ -36,7 +38,12 @@ type MediaAssetRow = {
   alt_text: string | null;
   upload_status: string;
   moderation_status: MediaModerationStatus;
+  sha256: string | null;
   storage_etag: string | null;
+  source_orientation: number;
+  normalized_width: number | null;
+  normalized_height: number | null;
+  derivative_status?: string | null;
   created_at: string;
 };
 
@@ -45,6 +52,9 @@ export type ValidatedImage = {
   extension: "jpg" | "png" | "webp";
   width: number;
   height: number;
+  sourceOrientation: number;
+  normalizedWidth: number;
+  normalizedHeight: number;
   byteSize: number;
   sha256: string;
 };
@@ -64,13 +74,17 @@ function getBucket(): R2Bucket | undefined {
   return bindings.MEDIA;
 }
 
+function getImages(): ImagesBinding | undefined {
+  return bindings.IMAGES;
+}
+
 function bytesToBase64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-async function sha256Buffer(buffer: ArrayBuffer): Promise<string> {
+export async function sha256Buffer(buffer: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", buffer);
   return bytesToBase64Url(new Uint8Array(digest));
 }
@@ -78,12 +92,15 @@ async function sha256Buffer(buffer: ArrayBuffer): Promise<string> {
 export function getMediaReadiness() {
   const database = Boolean(getDatabase());
   const storage = Boolean(getBucket());
+  const transformations = Boolean(getImages());
   return {
-    ready: database && storage,
+    ready: database && storage && transformations,
     database,
     storage,
+    transformations,
     maxBytes: MAX_MEDIA_BYTES,
     allowedMimeTypes: [...allowedMimeTypes.keys()],
+    derivativePolicyVersion: MEDIA_DERIVATIVE_POLICY_VERSION,
   };
 }
 
@@ -150,7 +167,7 @@ export async function createMediaUploadIntent(userId: string, input: {
   purpose?: unknown;
   altText?: unknown;
 }) {
-  if (!getMediaReadiness().ready) throw new Error("Media storage is not configured.");
+  if (!getMediaReadiness().ready) throw new Error("Media storage and transformations are not configured.");
 
   const validated = validateMediaIntentInput(input);
   if (!validated.valid) return { ok: false as const, errors: validated.errors };
@@ -235,6 +252,98 @@ function readUint32BE(bytes: Uint8Array, offset: number): number {
   return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0;
 }
 
+function readUint32LE(bytes: Uint8Array, offset: number): number {
+  return (bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) >>> 0;
+}
+
+function readAscii(bytes: Uint8Array, offset: number, length: number): string {
+  if (offset < 0 || offset + length > bytes.length) return "";
+  return String.fromCharCode(...bytes.slice(offset, offset + length));
+}
+
+function parseTiffOrientation(bytes: Uint8Array, tiffOffset: number): number {
+  if (tiffOffset < 0 || tiffOffset + 8 > bytes.length) return 1;
+  const byteOrder = readAscii(bytes, tiffOffset, 2);
+  const littleEndian = byteOrder === "II";
+  if (!littleEndian && byteOrder !== "MM") return 1;
+
+  const read16 = (offset: number) => littleEndian
+    ? bytes[offset] | (bytes[offset + 1] << 8)
+    : (bytes[offset] << 8) | bytes[offset + 1];
+  const read32 = (offset: number) => littleEndian ? readUint32LE(bytes, offset) : readUint32BE(bytes, offset);
+  if (read16(tiffOffset + 2) !== 42) return 1;
+
+  const firstIfd = read32(tiffOffset + 4);
+  const ifdOffset = tiffOffset + firstIfd;
+  if (firstIfd > bytes.length || ifdOffset < tiffOffset || ifdOffset + 2 > bytes.length) return 1;
+  const entryCount = Math.min(read16(ifdOffset), 256);
+  for (let index = 0; index < entryCount; index += 1) {
+    const entryOffset = ifdOffset + 2 + index * 12;
+    if (entryOffset + 12 > bytes.length) break;
+    if (read16(entryOffset) !== 0x0112) continue;
+    const type = read16(entryOffset + 2);
+    const count = read32(entryOffset + 4);
+    if (type !== 3 || count < 1) return 1;
+    const orientation = read16(entryOffset + 8);
+    return orientation >= 1 && orientation <= 8 ? orientation : 1;
+  }
+  return 1;
+}
+
+function parseJpegOrientation(bytes: Uint8Array): number {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return 1;
+  let offset = 2;
+  while (offset + 4 <= bytes.length) {
+    if (bytes[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+    while (offset < bytes.length && bytes[offset] === 0xff) offset += 1;
+    const marker = bytes[offset++];
+    if (marker === 0xda || marker === 0xd9) break;
+    if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+    if (offset + 2 > bytes.length) break;
+    const length = (bytes[offset] << 8) | bytes[offset + 1];
+    if (length < 2 || offset + length > bytes.length) break;
+    const dataOffset = offset + 2;
+    if (marker === 0xe1 && readAscii(bytes, dataOffset, 6) === "Exif\u0000\u0000") {
+      return parseTiffOrientation(bytes, dataOffset + 6);
+    }
+    offset += length;
+  }
+  return 1;
+}
+
+function parsePngOrientation(bytes: Uint8Array): number {
+  let offset = 8;
+  while (offset + 12 <= bytes.length) {
+    const length = readUint32BE(bytes, offset);
+    const type = readAscii(bytes, offset + 4, 4);
+    const dataOffset = offset + 8;
+    if (dataOffset + length + 4 > bytes.length) break;
+    if (type === "eXIf") return parseTiffOrientation(bytes, dataOffset);
+    if (type === "IEND") break;
+    offset = dataOffset + length + 4;
+  }
+  return 1;
+}
+
+function parseWebpOrientation(bytes: Uint8Array): number {
+  let offset = 12;
+  while (offset + 8 <= bytes.length) {
+    const type = readAscii(bytes, offset, 4);
+    const length = readUint32LE(bytes, offset + 4);
+    const dataOffset = offset + 8;
+    if (dataOffset + length > bytes.length) break;
+    if (type === "EXIF") {
+      const tiffOffset = readAscii(bytes, dataOffset, 6) === "Exif\u0000\u0000" ? dataOffset + 6 : dataOffset;
+      return parseTiffOrientation(bytes, tiffOffset);
+    }
+    offset = dataOffset + length + (length % 2);
+  }
+  return 1;
+}
+
 function parsePng(bytes: Uint8Array): { width: number; height: number } | null {
   const signature = [137, 80, 78, 71, 13, 10, 26, 10];
   if (bytes.length < 24 || !signature.every((value, index) => bytes[index] === value)) return null;
@@ -271,11 +380,11 @@ function parseJpeg(bytes: Uint8Array): { width: number; height: number } | null 
 function parseWebp(bytes: Uint8Array): { width: number; height: number } | null {
   if (
     bytes.length < 30
-    || String.fromCharCode(...bytes.slice(0, 4)) !== "RIFF"
-    || String.fromCharCode(...bytes.slice(8, 12)) !== "WEBP"
+    || readAscii(bytes, 0, 4) !== "RIFF"
+    || readAscii(bytes, 8, 4) !== "WEBP"
   ) return null;
 
-  const chunk = String.fromCharCode(...bytes.slice(12, 16));
+  const chunk = readAscii(bytes, 12, 4);
   const dataOffset = 20;
   if (chunk === "VP8X") {
     return { width: 1 + readUint24LE(bytes, 24), height: 1 + readUint24LE(bytes, 27) };
@@ -300,6 +409,10 @@ function parseWebp(bytes: Uint8Array): { width: number; height: number } | null 
   return null;
 }
 
+export function normalisedDimensions(width: number, height: number, orientation: number): { width: number; height: number } {
+  return orientation >= 5 && orientation <= 8 ? { width: height, height: width } : { width, height };
+}
+
 export async function validateImageBytes(buffer: ArrayBuffer, declaredMimeType: string): Promise<ValidatedImage> {
   if (buffer.byteLength < 16 || buffer.byteLength > MAX_MEDIA_BYTES) throw new Error("Image size is outside the accepted range.");
   const bytes = new Uint8Array(buffer);
@@ -321,7 +434,15 @@ export async function validateImageBytes(buffer: ArrayBuffer, declaredMimeType: 
   }
 
   if (mimeType !== declaredMimeType) throw new Error("The file signature does not match its declared content type.");
-  if (dimensions.width < 320 || dimensions.height < 240) throw new Error("Recipe images must be at least 320 by 240 pixels.");
+  const sourceOrientation = mimeType === "image/jpeg"
+    ? parseJpegOrientation(bytes)
+    : mimeType === "image/png"
+      ? parsePngOrientation(bytes)
+      : parseWebpOrientation(bytes);
+  const normalized = normalisedDimensions(dimensions.width, dimensions.height, sourceOrientation);
+  if (normalized.width < 320 || normalized.height < 240) {
+    throw new Error("Recipe images must be at least 320 by 240 pixels after orientation is normalized.");
+  }
   if (dimensions.width > 12_000 || dimensions.height > 12_000 || dimensions.width * dimensions.height > 40_000_000) {
     throw new Error("Image dimensions exceed the accepted safety limit.");
   }
@@ -331,6 +452,9 @@ export async function validateImageBytes(buffer: ArrayBuffer, declaredMimeType: 
     extension,
     width: dimensions.width,
     height: dimensions.height,
+    sourceOrientation,
+    normalizedWidth: normalized.width,
+    normalizedHeight: normalized.height,
     byteSize: buffer.byteLength,
     sha256: await sha256Buffer(buffer),
   };
@@ -351,6 +475,7 @@ export async function storeValidatedImage(intent: UploadIntentRow, buffer: Array
         ownerId: intent.owner_id,
         moderationStatus: "pending",
         sha256: image.sha256,
+        sourceOrientation: String(image.sourceOrientation),
       },
     });
     stored = true;
@@ -360,8 +485,9 @@ export async function storeValidatedImage(intent: UploadIntentRow, buffer: Array
         `INSERT INTO media_assets (
           id, owner_id, r2_key, mime_type, width, height, byte_size, alt_text,
           original_filename, purpose, upload_status, moderation_status, sha256,
-          storage_etag, uploaded_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'uploaded', 'pending', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          storage_etag, source_orientation, normalized_width, normalized_height,
+          uploaded_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'uploaded', 'pending', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       ).bind(
         assetId,
         intent.owner_id,
@@ -375,7 +501,15 @@ export async function storeValidatedImage(intent: UploadIntentRow, buffer: Array
         intent.purpose,
         image.sha256,
         object.httpEtag,
+        image.sourceOrientation,
+        image.normalizedWidth,
+        image.normalizedHeight,
       ),
+      database.prepare(
+        `INSERT INTO media_derivative_jobs (
+          media_id, policy_version, source_sha256, status, created_at, updated_at
+        ) VALUES (?, ?, ?, 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      ).bind(assetId, MEDIA_DERIVATIVE_POLICY_VERSION, image.sha256),
       database.prepare(
         `UPDATE media_upload_intents
          SET status = 'uploaded', completed_at = CURRENT_TIMESTAMP
@@ -390,10 +524,14 @@ export async function storeValidatedImage(intent: UploadIntentRow, buffer: Array
       mimeType: image.mimeType,
       width: image.width,
       height: image.height,
+      normalizedWidth: image.normalizedWidth,
+      normalizedHeight: image.normalizedHeight,
+      sourceOrientation: image.sourceOrientation,
       byteSize: image.byteSize,
       altText: intent.alt_text,
       moderationStatus: "pending" as const,
-      previewUrl: `/media/${intent.r2_key}?preview=1`,
+      derivativeStatus: "pending" as const,
+      previewUrl: mediaDeliveryUrl(intent.r2_key, image.sha256, true),
     };
   } catch (error) {
     if (stored) await bucket.delete(intent.r2_key);
@@ -407,7 +545,8 @@ export async function findMediaAssetByKey(key: string): Promise<MediaAssetRow | 
   if (!database) return null;
   return database.prepare(
     `SELECT id, owner_id, r2_key, mime_type, width, height, byte_size, alt_text,
-            upload_status, moderation_status, storage_etag, created_at
+            upload_status, moderation_status, sha256, storage_etag, source_orientation,
+            normalized_width, normalized_height, created_at
      FROM media_assets
      WHERE r2_key = ?
      LIMIT 1`,
@@ -419,11 +558,16 @@ export async function listOwnedMedia(userId: string, limit = 20) {
   if (!database) return [];
   const bounded = Math.min(Math.max(limit, 1), 50);
   const result = await database.prepare(
-    `SELECT id, owner_id, r2_key, mime_type, width, height, byte_size, alt_text,
-            upload_status, moderation_status, storage_etag, created_at
+    `SELECT media_assets.id, media_assets.owner_id, media_assets.r2_key, media_assets.mime_type,
+            media_assets.width, media_assets.height, media_assets.byte_size, media_assets.alt_text,
+            media_assets.upload_status, media_assets.moderation_status, media_assets.sha256,
+            media_assets.storage_etag, media_assets.source_orientation, media_assets.normalized_width,
+            media_assets.normalized_height, media_assets.created_at,
+            media_derivative_jobs.status AS derivative_status
      FROM media_assets
-     WHERE owner_id = ? AND upload_status != 'deleted'
-     ORDER BY created_at DESC
+     LEFT JOIN media_derivative_jobs ON media_derivative_jobs.media_id = media_assets.id
+     WHERE media_assets.owner_id = ? AND media_assets.upload_status != 'deleted'
+     ORDER BY media_assets.created_at DESC
      LIMIT ?`,
   ).bind(userId, bounded).all<MediaAssetRow>();
   return result.results ?? [];

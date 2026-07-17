@@ -1,134 +1,201 @@
-# Guarded R2 Media Pipeline
+# Guarded R2 media pipeline
 
-Contributor image upload and moderation are implemented but disabled by default. The checked-in D1 configuration keeps:
+Contributor image upload, privacy-safe derivative generation and moderation are implemented but disabled by default. The checked-in configuration keeps:
 
 ```jsonc
-"MEDIA_UPLOADS_ENABLED": "false"
+"AUTH_ENABLED": "false",
+"AUTH_REGISTRATION_ENABLED": "false",
+"MEDIA_UPLOADS_ENABLED": "false",
+"RECIPE_SUBMISSIONS_ENABLED": "false"
 ```
 
-Read [`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md) for the complete project state and continuation prompt.
+Read [`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md) for the complete project state. The executable synthetic test plan is documented in [`MEDIA_DERIVATIVE_TEST_MATRIX.md`](MEDIA_DERIVATIVE_TEST_MATRIX.md), and incident recovery is documented in [`MEDIA_DERIVATIVE_ROLLBACK.md`](MEDIA_DERIVATIVE_ROLLBACK.md).
 
-## Current storage model
+## Storage and authority model
 
-- Cloudflare D1 stores one-time upload-intent digests, expected file metadata, ownership, checksums, dimensions, alternative text, lifecycle state, and moderation history.
-- Cloudflare R2 stores each validated original raster image under a server-generated key.
-- The browser never selects an R2 key and never receives reusable storage credentials.
-- Recipe editors store only a D1 media asset identifier.
-- First submission and resubmission re-check media ownership, purpose, upload state, moderation state, and one-recipe assignment.
-- Recipe publication re-checks uploaded/approved media inside the final conditional D1 write.
+- D1 is authoritative for media ownership, original checksum/ETag, source and normalized dimensions, moderation state, derivative policy/source identity, generation leases, derivative checksums/ETags and cleanup state.
+- R2 remains a private bucket. It stores immutable validated originals under `uploads/...` and policy/checksum-scoped transformed objects under `derivatives/...`.
+- A key is never proof of authorization. Every preview or public response resolves the parent D1 asset first.
+- The browser never chooses an R2 key and never receives reusable R2 credentials.
+- Recipe records store a D1 media asset ID plus a Worker delivery URL; public reads remain `published`-only.
+- Cloudflare Images is used through the `IMAGES` binding only for server-side byte transforms. A direct Cloudflare Images public URL is not used.
 
-Originals remain private unless the D1 delivery rules permit access. Privacy-safe derivative generation is not implemented yet.
+## Migration `0008_media_derivatives`
+
+`0008_media_derivatives` is the eighth authoritative migration. It adds:
+
+- `media_assets.source_orientation`;
+- `media_assets.normalized_width` and `normalized_height`;
+- `media_assets.original_deleted_at`;
+- `media_derivative_jobs` for one active policy/source job per parent;
+- `media_derivatives` for each width/format object and its checksum/ETag;
+- indexes for ready delivery and cleanup;
+- backfill of uploaded legacy assets to a pending `recipe-images-v1` job;
+- triggers that immediately mark derivatives non-ready/cleanup-pending after rejection, quarantine or deletion;
+- source-checksum regeneration triggers that invalidate stale variants.
+
+The migration is additive. No remote D1 database was activated or modified by this implementation.
 
 ## Accepted originals
 
-- JPEG
-- PNG
-- WebP
-- Maximum 8 MB
-- Minimum 320 × 240 pixels
-- Maximum 12,000 pixels on either side
-- Maximum 40 megapixels overall
+- JPEG, PNG and WebP only;
+- maximum 8 MiB;
+- minimum 320 × 240 **after EXIF orientation normalization**;
+- maximum 12,000 pixels on either side;
+- maximum 40 megapixels overall.
 
-SVG and arbitrary binary uploads are rejected. The Worker compares declared MIME with the raster signature, parses dimensions, verifies expected byte size, and stores a SHA-256 checksum of the original bytes.
+SVG and arbitrary binary uploads remain rejected. The Worker compares the declared MIME type with the raster signature, validates dimensions, parses orientation from JPEG APP1 EXIF, PNG `eXIf` and WebP `EXIF`, and stores the original SHA-256 and R2 ETag.
 
-## Upload sequence
+Original objects are always written with `private, no-store`. They are never returned by `/media/...`, even when approved.
 
-1. A verified signed-in contributor requests an upload intent.
-2. The request passes same-origin, purpose-bound signed CSRF, current-session CSRF, rate-limit, type, size, filename, purpose, and alternative-text checks.
-3. D1 stores the intent token digest and expiry. The plaintext token is returned only once.
-4. The browser sends the raw file body to the Worker with the one-time bearer token.
-5. The Worker verifies expected metadata, raster signature, dimensions, and limits, then atomically consumes the intent.
-6. The validated original is written privately to R2 and a pending media asset is written to D1.
-7. The owner may privately preview an eligible asset; anonymous delivery remains denied while unapproved.
+## Upload and generation sequence
 
-## Moderation
+1. A verified contributor requests an upload intent.
+2. Same-origin, purpose-bound signed CSRF, current-session CSRF, rate limit, filename, purpose, MIME, expected size and alt-text checks run.
+3. D1 stores only the upload-token digest and expiry; the plaintext token is returned once.
+4. The upload Worker verifies the raw body, normalized dimensions and source checksum, then atomically claims the intent.
+5. The private original, D1 media asset and pending derivative job are committed as one logical upload operation.
+6. Generation re-reads the original from private R2 and refuses to continue unless both source ETag and SHA-256 match D1.
+7. A conditional D1 lease changes the job to `generating`; concurrent callers receive `busy`, and a stopped lease becomes reclaimable after five minutes.
+8. Required JPEG/WebP variants and optional AVIF variants are generated, verified and stored under deterministic policy/source keys.
+9. The job becomes `ready` only when every required JPEG/WebP variant is recorded. Optional AVIF failure never removes the mandatory fallback matrix.
+10. Old policy/source objects are cleaned only after the current job is ready.
 
-The private queue at `/admin/media` is restricted to verified editor and administrator accounts.
+If generation fails after the upload is accepted, the original remains private and the job is `failed`. The asset cannot be approved or publicly delivered until guarded regeneration succeeds.
 
-Editors can:
+## Transformation policy `recipe-images-v1`
 
-- approve an asset;
-- reject an asset with a reason;
-- quarantine an asset with a reason;
-- return an asset to pending review.
+### Bounded widths
 
-Every accepted transition records moderator, previous state, next state, reason, and timestamp. Rejected and quarantined images cannot be attached to a new or revised recipe and cannot be served anonymously.
+The policy generates `320`, `640`, `960` and `1280` widths, capped at the normalized source width. The source is never upscaled and duplicate widths collapse.
 
-## Current delivery rules
+### Formats
 
-- Anonymous requests receive only D1 assets whose state is both `uploaded` and `approved`.
-- Owners can privately preview their own eligible assets.
-- Editors and administrators can privately preview moderation assets.
-- Private previews use `private, no-store` and vary by cookie.
-- Approved original delivery uses immutable public caching and ETags.
-- Responses use `nosniff` and same-site cross-origin resource policy headers.
-- A guessed or leaked R2 key is insufficient without a matching approved D1 record.
+- JPEG quality 82 is required and supplies the universal fallback. Transparent input is flattened onto white.
+- WebP quality 82 is required.
+- AVIF quality 72 is optional and attempted only through 960 pixels.
 
-## Recipe integration
+The runtime result MIME type is checked. An AVIF request that falls back to another format is not stored as AVIF; WebP/JPEG remain available.
 
-### First submission
+### Orientation and metadata guarantees
 
-The server requires an uploaded `recipe_hero` owned by the contributor. Pending or approved media may enter private recipe review, but publication requires approval.
+Cloudflare Images applies source orientation during transform. The Worker also validates that output dimensions match the normalized aspect ratio. Generated objects are scanned before storage:
 
-### Requested-change revisions
+- JPEG rejects APP1, APP2, APP13 and comment segments;
+- WebP rejects EXIF, XMP and ICC chunks;
+- AVIF rejects known EXIF/XMP payload markers;
+- output type and dimensions are verified through the Images binding.
 
-The owner-only revision editor restores the current attached image only when it is uploaded and pending or approved. Rejected, quarantined, deleted, or unavailable media must be replaced.
+This provides a fail-closed application guarantee rather than assuming encoding removed metadata.
 
-The resubmission transaction validates that the replacement belongs to the contributor and is not assigned to another recipe. Recipe, media reference, normalized content, and immutable snapshots are committed in one guarded D1 batch.
+## Idempotency, checksums and ETags
 
-### Publication
-
-Recipe publication requires:
+A derivative identity is:
 
 ```text
-upload_status = uploaded
-moderation_status = approved
+parent media ID + policy version + source SHA-256 + width + format
 ```
 
-The final conditional recipe update checks this state again to prevent a concurrent media transition from publishing stale content.
+R2 keys use the same deterministic identity. D1 holds the generated byte size, output SHA-256 and R2 HTTP ETag. Delivery verifies R2 ETag and size against D1 before returning bytes. A mismatch returns `503` with no-store headers.
+
+A ready job with the current policy and checksum is a no-op for normal regeneration. Editors/admins can request a guarded forced rewrite. Changing the policy constant creates a new namespace; changing the source checksum marks the job pending and old rows deleting.
+
+## Moderation and ownership
+
+The private queue at `/admin/media` remains restricted to verified editors/admins.
+
+- Approval is a conditional D1 update that requires a current-policy ready job with a complete required matrix.
+- Rejection or quarantine denies public delivery in D1 immediately, then deletes derivative rows/objects.
+- Returning an asset to pending makes a cleaned/failed job regenerable.
+- Contributors may regenerate only their own uploaded assets.
+- Editors/admins may regenerate eligible assets and use the force option.
+- Rejected/quarantined assets cannot regenerate until an authorized moderator returns them to pending.
+
+Moderation does not publish a recipe. Recipe publication still independently checks uploaded/approved media in its atomic editorial transition.
+
+## Delivery contract
+
+Route:
+
+```text
+GET|HEAD /media/{original-r2-key}
+```
+
+The path identifies the parent only. The route never fetches the original key.
+
+### Public
+
+Public delivery requires all of the following:
+
+- parent `upload_status='uploaded'`;
+- parent `moderation_status='approved'`;
+- parent source checksum present;
+- current `recipe-images-v1` job `ready`;
+- complete required JPEG/WebP count;
+- current derivative row `ready`;
+- derivative R2 object ETag and size matching D1.
+
+The canonical query includes `v={policy}.{source-checksum-prefix}`. Missing/stale versions redirect to the canonical URL. `w` selects a bounded width; `Accept` negotiates AVIF, then WebP, then JPEG. `format=avif|webp|jpeg` requests an exact ready format.
+
+Public responses use immutable one-year browser/shared cache headers, `Vary: Accept`, output ETag, `X-Content-SHA256`, `nosniff`, and same-site resource policy.
+
+### Private previews
+
+`?preview=1` is available only to the owner of a pending/approved asset or to an editor/admin. It still returns a transformed derivative, never the original. Every preview and preview error uses:
+
+```text
+Cache-Control: private, no-store
+Vary: Cookie, Accept
+```
+
+## Guarded lifecycle routes
+
+| Method and route | Purpose |
+| --- | --- |
+| `POST /api/media/intent` | Create a one-time upload authorization |
+| `POST /api/media/upload` | Validate/store a private original and generate derivatives |
+| `POST /api/media/{id}/derivatives` | Owner/editor guarded regeneration; editor force option |
+| `POST /api/media/{id}/moderate` | Editor/admin moderation with approval derivative gate |
+| `DELETE /api/media/{id}` | Owner/editor deletion after confirming no recipe references the asset |
+| `GET|HEAD /media/{key}` | Approval-gated public derivative or authorized private derivative preview |
+
+All mutation routes require authenticated sessions, same-origin checks and purpose-bound CSRF. Delete first changes D1 to `deleted`, making delivery impossible, then deletes derivatives and the private original. Partial cleanup therefore fails closed.
+
+## Replacement semantics
+
+Originals are immutable. Replacing a recipe image means uploading a new media asset and atomically attaching the new asset through the contributor revision flow. The previous asset is not silently deleted. After it is detached from every recipe, its owner or an editor/admin may delete it, triggering derivative and original cleanup.
+
+## Health and guarded deployment
+
+`/api/health` now reports:
+
+- DB, private R2 and Images binding readiness;
+- policy version, widths, required/optional formats and AVIF cap;
+- original-public-delivery false;
+- approval and ready-derivative public gates;
+- orientation normalization and metadata verification;
+- deterministic keys, idempotent leases, checksum regeneration and cleanup lifecycle.
+
+The guarded activation workflow refuses to continue unless these capabilities and mandatory JPEG/WebP fallbacks are present. It does not generate sample media or approve content.
 
 ## Activation order
 
-Do not enable uploads merely because authentication is available.
+1. Keep all four checked-in flags false.
+2. Provision D1/R2/KV/Images only in a controlled environment.
+3. Apply all authoritative migrations through `0008_media_derivatives`.
+4. Verify `/api/health` and guarded workflow capability assertions.
+5. Run the complete synthetic fixture matrix in [`MEDIA_DERIVATIVE_TEST_MATRIX.md`](MEDIA_DERIVATIVE_TEST_MATRIX.md).
+6. Confirm moderation staffing, retention, deletion, appeal and incident procedures.
+7. Enable controlled authentication and provision test roles.
+8. Enable media uploads only in controlled runtime configuration.
+9. Exercise upload, private preview, regeneration, moderation, public fallback, cache and cleanup cases.
+10. Enable recipe submissions separately only after media acceptance.
 
-1. Provision D1 and apply all authoritative migrations through `0007_recipe_revisions`.
-2. Confirm R2 is bound.
-3. Enable and test controlled authentication.
-4. Provision contributor and editor/admin test accounts.
-5. Confirm moderation staffing, retention, deletion, appeal, and escalation procedures.
-6. Test valid uploads, invalid MIME/signatures, limits, reused/expired intents, owner previews, moderation, recipe attachment, replacement media, and anonymous denial of unapproved media.
-7. Set `MEDIA_UPLOADS_ENABLED=true` only in the controlled deployment configuration.
-8. Verify `/api/health` reports storage and upload readiness.
-9. Enable recipe submissions separately only after the media matrix passes.
+## Boundaries
 
-The repository default must remain false. Turning the flag off closes new intents/uploads while preserving existing stored data, editorial access, approved delivery, and published recipe references.
-
-## Recommended next phase: privacy-safe derivatives
-
-The next implementation phase should add transformed delivery while preserving the existing ownership and moderation model.
-
-Required scope:
-
-1. Keep originals private.
-2. Normalize EXIF orientation.
-3. Strip EXIF and unnecessary metadata.
-4. Generate bounded responsive variants.
-5. Prefer WebP and AVIF where runtime support and fallback behavior are verified.
-6. Record derivative version, dimensions, format, checksum/ETag, source checksum, and generation status.
-7. Serve public derivatives only when the parent D1 asset is uploaded and approved.
-8. Keep contributor/editor private previews no-store.
-9. Define regeneration when transformation policy changes.
-10. Define cleanup when an original is deleted, rejected, quarantined, or replaced.
-11. Add idempotency and race protection for generation.
-12. Add health diagnostics, CI validator invariants, test matrix, rollback, and documentation.
-
-Cloudflare Images or a controlled Worker transformation path may be used, but the implementation must not expose originals or bypass D1 approval.
-
-## Current boundaries
-
-- Uploading or approving an image does not publish a recipe.
-- Detaching an asset does not silently delete its R2 original.
-- Original-file metadata may still exist until the derivative phase is implemented.
-- Automated malware/content scanning is not implemented.
-- Public derivative URLs, responsive variant selection, regeneration, and derivative cleanup are not implemented.
-- All production activation remains pending.
+- No deployment, remote D1 migration, account provisioning, real upload, recipe creation or moderation occurred in this phase.
+- Automated malware and semantic content scanning are still not implemented.
+- Optional AVIF depends on exact runtime output; JPEG/WebP are the approval requirement.
+- R2 cleanup is synchronous and recoverable but no scheduled sweeper/queue consumer is included yet.
+- Remote backups, cache purge procedures and legal retention policy remain operational responsibilities.
+- Checked-in defaults remain disabled.

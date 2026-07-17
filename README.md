@@ -72,24 +72,28 @@ The account system is implemented for D1 but disabled by default.
 
 Pending or unverified accounts cannot create sessions. Public registration remains closed until legal, email-delivery, Turnstile, D1, KV, secret, and operational requirements are approved.
 
-### Guarded R2 media and moderation
+### Guarded R2 media, privacy-safe derivatives, and moderation
 
 Contributor media is implemented but independently disabled.
 
 - One-time D1 upload intents with token digests and expiry
-- Server-generated R2 keys
+- Server-generated private R2 original keys
 - JPEG, PNG, and WebP allowlist; SVG rejected
-- 8 MB limit, dimension limits, 40-megapixel cap, raster signature parsing, MIME/size verification, and raw SHA-256 checksum
-- Private R2 originals with D1 ownership and lifecycle metadata
-- Contributor-private pending previews
+- 8 MiB, dimension, 40-megapixel, signature, MIME/size and source SHA-256 checks
+- JPEG/PNG/WebP EXIF-orientation parsing and normalized-dimension validation
+- `recipe-images-v1` responsive widths at 320/640/960/1280 without upscaling
+- Required JPEG and WebP derivatives; optional exact-MIME AVIF through 960 px
+- Output metadata scanners for JPEG APP/COM, WebP EXIF/XMP/ICC, and AVIF EXIF/XMP markers
+- D1 generation leases, deterministic policy/checksum R2 keys, retry-safe regeneration, output checksums and ETags
+- Private originals never served by `/media`; public delivery resolves approved current-policy derivatives only
+- Contributor/editor derivative previews with `private, no-store`
 - Editor/admin moderation queue at `/admin/media`
-- Pending, approved, rejected, and quarantined states
-- Required reasons for reject and quarantine decisions
-- Trigger-backed moderation history
-- Anonymous delivery only for uploaded and approved assets
-- Private no-store previews and immutable public delivery with ETags
+- Approval blocked until the mandatory derivative matrix is ready
+- Rejection, quarantine and deletion trigger fail-closed cleanup lifecycle
+- Immutable public derivative caching, canonical policy/checksum URL versions and `Accept` negotiation
+- Guarded owner/editor regeneration and detach-before-delete routes
 
-Privacy-safe transformed derivatives are not implemented yet and are the recommended next phase.
+See [`docs/MEDIA_PIPELINE.md`](docs/MEDIA_PIPELINE.md), [`docs/MEDIA_DERIVATIVE_TEST_MATRIX.md`](docs/MEDIA_DERIVATIVE_TEST_MATRIX.md), and [`docs/MEDIA_DERIVATIVE_ROLLBACK.md`](docs/MEDIA_DERIVATIVE_ROLLBACK.md).
 
 ### Initial recipe submission
 
@@ -151,8 +155,8 @@ review
 | Current public data | Versioned TypeScript fallback catalogue |
 | Relational recipe/account data | Cloudflare D1 |
 | Sessions and lightweight security state | Workers KV |
-| Original contributor media | Cloudflare R2 |
-| Future derivatives | Cloudflare Images or Worker-based transforms |
+| Private original and derivative objects | Cloudflare R2 |
+| Privacy-safe server-side transforms | Cloudflare Images binding |
 | Bot protection | Turnstile |
 | Verification delivery | Authenticated HTTPS webhook |
 | Market detection | Cloudflare request `cf.country` |
@@ -170,6 +174,7 @@ migrations/d1/0004_auth_accounts/migration.sql
 migrations/d1/0005_media_pipeline/migration.sql
 migrations/d1/0006_recipe_editorial/migration.sql
 migrations/d1/0007_recipe_revisions/migration.sql
+migrations/d1/0008_media_derivatives/migration.sql
 ```
 
 `wrangler.d1.jsonc` uses:
@@ -178,7 +183,7 @@ migrations/d1/0007_recipe_revisions/migration.sql
 "migrations_pattern": "migrations/d1/*/migration.sql"
 ```
 
-Migration four adds account, identity, consent, token, and audit security. Migration five adds media intents, lifecycle, moderation, and event history. Migration six adds recipe-media ownership, lock revisions, editorial timestamps/events, and status-transition triggers. Migration seven adds content revisions, change-request/resubmission timestamps, guarded write tokens, and immutable snapshots.
+Migration four adds account, identity, consent, token, and audit security. Migration five adds media intents, lifecycle, moderation, and event history. Migration six adds recipe-media ownership, lock revisions, editorial timestamps/events, and status-transition triggers. Migration seven adds content revisions, change-request/resubmission timestamps, guarded write tokens, and immutable snapshots. Migration eight adds orientation/normalized dimensions, policy/source derivative jobs, per-variant checksum/ETag metadata, generation leases, regeneration, and cleanup triggers.
 
 Root-level SQL files are legacy references and are not part of Wrangler's execution path.
 
@@ -210,7 +215,7 @@ Keep trusted-write flags false unless a deliberate non-production or production 
 
 ## Guarded GitHub workflows
 
-- `.github/workflows/ci.yml` validates catalogue, seven migrations, security invariants, public scripts, operational scripts, Cloudflare types, and the Worker build.
+- `.github/workflows/ci.yml` validates catalogue, eight migrations, derivative privacy/security invariants, public scripts, operational scripts, Cloudflare types, and both Worker builds.
 - `.github/workflows/deploy.yml` deploys the D1-free Worker from `main`.
 - `.github/workflows/enable-d1.yml` requires exact `ENABLE_D1` confirmation before provisioning/migrating D1 while trusted writes remain disabled.
 - `.github/workflows/enable-auth.yml` requires exact `ENABLE_AUTH`, applies migrations, enables sign-in, and independently controls registration, media, and recipe submissions/revisions.
@@ -246,6 +251,8 @@ Keep trusted-write flags false unless a deliberate non-production or production 
 - `/api/media/intents`
 - `/api/media/upload`
 - `/api/media/mine`
+- `POST /api/media/:id/derivatives`
+- `DELETE /api/media/:id`
 - `/api/recipes/submissions`
 - `/api/recipes/:id/resubmit`
 

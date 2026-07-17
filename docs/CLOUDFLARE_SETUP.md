@@ -12,7 +12,7 @@ In the target Cloudflare account, confirm:
 2. Workers KV is available for sessions and lightweight security state.
 3. R2 is activated for private contributor originals.
 4. D1 capacity is available before running the guarded D1 workflow.
-5. Cloudflare Images is available only if the future derivative implementation chooses that path.
+5. Cloudflare Images is available for the server-side `IMAGES` binding used by privacy-safe derivative generation.
 6. A domain is active in Cloudflare only when a custom hostname will be connected.
 
 Wrangler can provision draft `SESSION` KV, `MEDIA` R2, and `IMAGES` bindings during deployment. D1 is provisioned only through the guarded D1 workflow.
@@ -141,6 +141,7 @@ migrations/d1/0004_auth_accounts/migration.sql
 migrations/d1/0005_media_pipeline/migration.sql
 migrations/d1/0006_recipe_editorial/migration.sql
 migrations/d1/0007_recipe_revisions/migration.sql
+migrations/d1/0008_media_derivatives/migration.sql
 ```
 
 `wrangler.d1.jsonc` uses:
@@ -190,7 +191,7 @@ Follow [`D1_AUTH_SETUP.md`](D1_AUTH_SETUP.md) for exact dependencies, secrets, t
 
 Required order:
 
-1. Apply all seven migrations with every trusted-write flag false.
+1. Apply all eight migrations with every trusted-write flag false.
 2. Configure independent password/fingerprint peppers and Turnstile.
 3. Enable controlled sign-in while registration, media, and recipe writes remain false.
 4. Provision controlled contributor and editor/admin accounts.
@@ -204,21 +205,19 @@ Recipe activation is rejected unless media uploads are also requested. Deployed 
 
 ## 10. Privacy-safe image derivatives
 
-Cloudflare Images is declared as an optional future integration, not an active public transformation pipeline.
+The D1 Worker now uses the `IMAGES` binding for guarded server-side transformations while keeping the `MEDIA` R2 bucket private. The binding alone does not activate uploads or public delivery.
 
-The next recommended phase should:
+Deployment acceptance requires `/api/health` to confirm:
 
-- keep R2 originals private;
-- normalize orientation;
-- strip EXIF and unnecessary metadata;
-- create bounded responsive WebP/AVIF variants;
-- record derivative lifecycle and source checksum/version;
-- serve derivatives only when the parent D1 asset is uploaded and approved;
-- define regeneration and cleanup behavior;
-- preserve private no-store previews and public cache/ETag guarantees;
-- add health, validator, testing, rollback, and documentation.
+- policy `recipe-images-v1`;
+- Images transformation readiness;
+- private-original public delivery disabled;
+- approval plus ready-derivative public gates;
+- required JPEG/WebP fallback formats;
+- orientation normalization and generated-byte metadata verification;
+- deterministic keys, D1 generation leases, checksum regeneration, and cleanup lifecycle.
 
-Do not enable runtime transformation merely because the `IMAGES` binding exists.
+Use synthetic fixtures and the complete matrix in [`MEDIA_DERIVATIVE_TEST_MATRIX.md`](MEDIA_DERIVATIVE_TEST_MATRIX.md). Recovery and rollback are defined in [`MEDIA_DERIVATIVE_ROLLBACK.md`](MEDIA_DERIVATIVE_ROLLBACK.md). Do not enable runtime uploads merely because the binding exists.
 
 ## 11. Rollback
 

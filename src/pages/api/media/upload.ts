@@ -10,6 +10,7 @@ import {
   validateImageBytes,
 } from "../../../lib/media";
 import { getMediaRuntimeStatus } from "../../../lib/media-runtime";
+import { generateMediaDerivatives } from "../../../lib/media-derivatives";
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, {
@@ -65,16 +66,27 @@ export const PUT: APIRoute = async ({ request, locals }) => {
     return json({ ok: false, error: "Uploaded bytes do not match the authorized size." }, 413);
   }
 
+  let asset: Awaited<ReturnType<typeof storeValidatedImage>>;
   try {
     const image = await validateImageBytes(buffer, declaredMimeType);
     const claimed = await claimUploadIntent(intent.id);
     if (!claimed) return json({ ok: false, error: "This upload authorization has already been used." }, 409);
-
-    const asset = await storeValidatedImage(intent, buffer, image);
-    return json({ ok: true, asset }, 201);
+    asset = await storeValidatedImage(intent, buffer, image);
   } catch (error) {
     await markUploadIntentFailed(intent.id);
     const message = error instanceof Error ? error.message : "The image could not be accepted.";
     return json({ ok: false, error: message }, 422);
+  }
+
+  try {
+    const derivatives = await generateMediaDerivatives(asset.id);
+    return json({ ok: true, asset: { ...asset, derivativeStatus: derivatives.status } }, 201);
+  } catch (error) {
+    console.error("Privacy-safe derivative generation failed after the private original was accepted.", error);
+    return json({
+      ok: true,
+      asset: { ...asset, derivativeStatus: "failed" },
+      warning: "The private original was stored, but public-safe previews are not ready. Regeneration is required before approval.",
+    }, 201);
   }
 };

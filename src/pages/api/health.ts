@@ -5,6 +5,7 @@ import { getAuthReadiness } from "../../lib/auth";
 import { hasDatabase } from "../../lib/db";
 import { markets } from "../../lib/market";
 import { getMediaReadiness } from "../../lib/media";
+import { getMediaDerivativeReadiness } from "../../lib/media-derivatives";
 import { getMediaRuntimeStatus } from "../../lib/media-runtime";
 import { getRecipeSubmissionReadiness } from "../../lib/recipe-submissions";
 
@@ -21,6 +22,7 @@ export const GET: APIRoute = async () => {
   const d1Bound = hasDatabase();
   const auth = getAuthReadiness();
   const media = getMediaReadiness();
+  const derivatives = getMediaDerivativeReadiness();
   const mediaRuntime = getMediaRuntimeStatus();
   const recipeSubmissions = getRecipeSubmissionReadiness();
 
@@ -57,13 +59,28 @@ export const GET: APIRoute = async () => {
       },
       media: {
         uploadsEnabled: mediaRuntime.uploadsEnabled,
-        storageReady: media.ready,
-        ready: mediaRuntime.uploadsEnabled && media.ready && auth.ready,
+        storageReady: media.database && media.storage,
+        transformationsReady: media.transformations,
+        ready: mediaRuntime.uploadsEnabled && derivatives.ready && auth.ready,
         database: media.database,
         storage: media.storage,
+        transformations: derivatives.transformations,
         maximumUploadBytes: media.maxBytes,
         allowedMimeTypeCount: media.allowedMimeTypes.length,
-        publicDeliveryRequiresApproval: true,
+        derivativePolicyVersion: derivatives.policyVersion,
+        derivativeWidths: derivatives.widths,
+        requiredFormats: derivatives.requiredFormats,
+        optionalFormats: derivatives.optionalFormats,
+        avifMaxWidth: derivatives.avifMaxWidth,
+        originalPublicDelivery: derivatives.originalPublicDelivery,
+        publicDeliveryRequiresApproval: derivatives.approvalRequired,
+        publicDeliveryRequiresReadyDerivatives: derivatives.readyDerivativesRequired,
+        orientationNormalization: derivatives.orientationNormalization,
+        metadataStrippingVerified: derivatives.metadataStrippingVerified,
+        deterministicKeys: derivatives.deterministicKeys,
+        idempotentLocks: derivatives.idempotentLocks,
+        checksumRegeneration: derivatives.checksumRegeneration,
+        cleanupLifecycle: derivatives.cleanupLifecycle,
       },
       recipeSubmissions: {
         enabled: recipeSubmissions.enabled,

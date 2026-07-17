@@ -47,6 +47,7 @@ migrations/d1/0004_auth_accounts/migration.sql
 migrations/d1/0005_media_pipeline/migration.sql
 migrations/d1/0006_recipe_editorial/migration.sql
 migrations/d1/0007_recipe_revisions/migration.sql
+migrations/d1/0008_media_derivatives/migration.sql
 ```
 
 `wrangler.d1.jsonc` uses:
@@ -61,6 +62,7 @@ Migration responsibilities:
 - `0005_media_pipeline` — upload intents, lifecycle/moderation fields, checksums, storage ETags, moderation events, and status-transition trigger
 - `0006_recipe_editorial` — recipe-media ownership, optimistic lock revision, editorial timestamps/reasons, editorial events, and transition triggers
 - `0007_recipe_revisions` — content revision, change-request/resubmission timestamps, unique guarded write token, and immutable revision snapshots
+- `0008_media_derivatives` — source orientation/normalized dimensions, derivative jobs/variants, generation leases, output checksums/ETags, regeneration, and cleanup triggers
 
 Root-level SQL files are legacy references and are not part of Wrangler's execution path.
 
@@ -158,11 +160,12 @@ This permits controlled verified accounts to sign in while registration, uploads
 
 Before enabling uploads:
 
-1. Confirm migration `0005_media_pipeline` is applied and R2 is bound.
+1. Confirm migrations through `0008_media_derivatives` are applied and private R2 plus the `IMAGES` binding are ready.
 2. Provision controlled contributor and editor/admin accounts.
-3. Test valid/invalid raster files, MIME/signature mismatch, byte/dimension limits, one-time intent reuse, checksum storage, private previews, moderation, and anonymous denial of unapproved assets.
-4. Approve retention, deletion, appeal, escalation, and moderation procedures.
-5. Review [`MEDIA_PIPELINE.md`](MEDIA_PIPELINE.md).
+3. Complete the synthetic orientation, metadata, format fallback, race, cache, cleanup, and rollback matrix in [`MEDIA_DERIVATIVE_TEST_MATRIX.md`](MEDIA_DERIVATIVE_TEST_MATRIX.md).
+4. Confirm `/api/health` reports the current derivative policy, mandatory JPEG/WebP matrix, private-original denial, metadata verification, leases, regeneration, and cleanup capabilities.
+5. Approve retention, deletion, appeal, escalation, and moderation procedures.
+6. Review [`MEDIA_PIPELINE.md`](MEDIA_PIPELINE.md) and [`MEDIA_DERIVATIVE_ROLLBACK.md`](MEDIA_DERIVATIVE_ROLLBACK.md).
 
 Run **Enable Authentication** with `enable_media_uploads=true`. Registration and recipe submissions may remain false.
 
@@ -170,7 +173,7 @@ Run **Enable Authentication** with `enable_media_uploads=true`. Registration and
 
 Before activation:
 
-1. Confirm migrations through `0007_recipe_revisions` are applied.
+1. Confirm migrations through `0008_media_derivatives` are applied.
 2. Keep `enable_media_uploads=true`.
 3. Provision controlled contributor and editor/admin accounts.
 4. Complete the initial submission, editorial, revision, publication, and rollback tests below.
