@@ -1,6 +1,6 @@
 # Ozzyl Recipes
 
-An original international recipe discovery, kitchen-planning, contributor, and future publishing platform built with Astro 7 and Cloudflare Workers. The initial audience focus is the United States, Canada, the United Kingdom, Australia, New Zealand, France, Germany, Switzerland, Sweden, and the Netherlands.
+An original international recipe discovery, kitchen-planning, contributor, and guarded publishing platform built with Astro 7 and Cloudflare Workers. The initial audience focus is the United States, Canada, the United Kingdom, Australia, New Zealand, France, Germany, Switzerland, Sweden, and the Netherlands.
 
 The project does not copy Allrecipes branding, source code, copyrighted recipe content, or its exact interface.
 
@@ -38,14 +38,18 @@ The server-rendered finder and JSON API share keyword, ingredient, country, cate
 - Cache-first same-origin scripts, styles, images, and fonts
 - API and media routes excluded from service-worker interception
 
-### Contributor drafts
+### Contributor drafts and guarded submission
 
 - Browser-autosaved editor at `/recipes/new`
 - Country, language, measurement, taxonomy, timing, yield, ingredients, and directions
 - Dynamic rows, live preview, Worker validation, field errors, and JSON export
-- Optional media asset reference retained in the local structured draft
+- Optional private R2 hero-image attachment
+- Purpose-bound CSRF and per-account submission limiting
+- D1 validation of categories, contributor ownership, asset purpose, moderation state, and one-recipe media assignment
+- Atomic D1 batch for the recipe row, taxonomy relations, ingredients, and directions
+- Contributor status page at `/account/submissions`
 
-Text drafts remain usable without an account. Uploading media or validating a draft does not publish a recipe.
+Text drafts remain usable without an account. Uploading media, validating a draft, or entering the private review queue does not publish a recipe.
 
 ### D1 authentication foundation
 
@@ -89,7 +93,22 @@ Contributor image upload and moderation are implemented but independently disabl
 - Private previews use `private, no-store`; approved delivery uses immutable caching and ETags
 - Explicit `MEDIA_UPLOADS_ENABLED` activation flag in addition to authentication readiness
 
-Detaching a media asset from a local draft does not silently delete its R2 object. A future publishing transaction must re-check asset ownership and approval in D1.
+Detaching a media asset from a local draft does not silently delete its R2 object.
+
+### Guarded recipe editorial workflow
+
+Recipe review and publication are implemented but independently disabled by default.
+
+- Explicit `RECIPE_SUBMISSIONS_ENABLED` activation flag
+- Private editor/admin queue at `/admin/recipes`
+- Detailed review at `/admin/recipes/:id`
+- Separate media approval and recipe publication decisions
+- Publication requires complete content and an uploaded, approved hero image
+- Optimistic revision checks prevent stale editorial decisions
+- Final conditional D1 update rechecks approved media during publication
+- Archival from review requires an editorial reason
+- D1 trigger-backed `recipe_editorial_events` history
+- Public D1 reads continue to expose only status `published`
 
 ### Accessibility, SEO, and security
 
@@ -98,7 +117,7 @@ Detaching a media asset from a local draft does not silently delete its R2 objec
 - Personal/editor/planning/account/admin routes use `noindex` and `no-store` where appropriate
 - Astro middleware CSP, HSTS, frame, MIME, referrer, permissions, and cross-origin protections
 - Syntax validation for public scripts and service worker
-- Catalogue, taxonomy, market, nested migration, authentication, and media invariant validation
+- Catalogue, market, six-stage migration, authentication, media, and recipe-editorial invariant validation
 
 ## Cloudflare architecture
 
@@ -107,7 +126,7 @@ Detaching a media asset from a local draft does not silently delete its R2 objec
 | Frontend and SSR | Astro 7 on Cloudflare Workers |
 | Static assets | Workers Static Assets |
 | Current public recipe data | Versioned TypeScript catalogue |
-| Future relational data and accounts | D1 |
+| Relational recipe and account data | D1 |
 | Sessions and lightweight security state | Workers KV |
 | Original contributor media | R2 |
 | Future derivative optimisation | Cloudflare Images binding |
@@ -145,10 +164,11 @@ The checked-in D1 config keeps all trusted write surfaces disabled:
 ```jsonc
 "AUTH_ENABLED": "false",
 "AUTH_REGISTRATION_ENABLED": "false",
-"MEDIA_UPLOADS_ENABLED": "false"
+"MEDIA_UPLOADS_ENABLED": "false",
+"RECIPE_SUBMISSIONS_ENABLED": "false"
 ```
 
-D1 recipe reads can therefore be enabled before account access. Sign-in is activated after its dependencies are ready; registration and contributor media are separately enabled only after their own operational checks.
+D1 recipe reads can therefore be enabled before account access. Sign-in, registration, contributor media, and recipe submissions are independently enabled only after their own operational checks.
 
 ## Authoritative D1 migrations
 
@@ -160,6 +180,7 @@ migrations/d1/0002_seed/migration.sql
 migrations/d1/0003_market_coverage/migration.sql
 migrations/d1/0004_auth_accounts/migration.sql
 migrations/d1/0005_media_pipeline/migration.sql
+migrations/d1/0006_recipe_editorial/migration.sql
 ```
 
 `wrangler.d1.jsonc` uses:
@@ -168,7 +189,9 @@ migrations/d1/0005_media_pipeline/migration.sql
 "migrations_pattern": "migrations/d1/*/migration.sql"
 ```
 
-Migration four adds account security, token, identity, consent, and audit tables. Migration five adds one-time upload intents, media lifecycle and moderation fields, moderation events, and a database trigger that records real status transitions. Root-level SQL files are legacy references and are not part of the Wrangler execution path.
+Migration four adds account security, token, identity, consent, and audit tables. Migration five adds one-time media upload intents, media lifecycle and moderation fields, moderation events, and a trigger for real media transitions. Migration six adds recipe-media ownership, optimistic revisions, submission/review timestamps, editorial events, and triggers for initial review submission and status transitions.
+
+Root-level SQL files are legacy references and are not part of the Wrangler execution path.
 
 ## Local development
 
@@ -187,14 +210,14 @@ npm run db:migrate:local
 npm run build:d1
 ```
 
-Keep all account and media flags disabled unless the local D1, KV, R2, Turnstile values, independent peppers, verification webhook, editor account, and moderation test process are intentionally configured.
+Keep all trusted-write flags disabled unless local D1, KV, R2, Turnstile values, independent peppers, verification delivery, contributor/editor accounts, and the account/media/recipe test matrices are intentionally configured.
 
 ## GitHub Actions
 
 - `.github/workflows/ci.yml` validates catalogue, browser scripts, authoritative migrations, security invariants, Cloudflare types, operational scripts, and the Worker build.
 - `.github/workflows/deploy.yml` deploys the D1-free Worker from `main` and verifies static mode plus KV/R2/Images bindings.
-- `.github/workflows/enable-d1.yml` requires the exact `ENABLE_D1` confirmation before provisioning D1, applying migrations, and verifying D1 mode with accounts and uploads disabled.
-- `.github/workflows/enable-auth.yml` requires the exact `ENABLE_AUTH` confirmation, applies pending migrations while trusted writes are disabled, uploads secrets from runner-only files, enables sign-in, and separately accepts optional registration and media-upload flags. It verifies `/api/health` and always deletes temporary files.
+- `.github/workflows/enable-d1.yml` requires exact `ENABLE_D1` confirmation before provisioning D1, applying migrations, and verifying D1 mode with trusted writes disabled.
+- `.github/workflows/enable-auth.yml` requires exact `ENABLE_AUTH`, applies migrations while trusted writes are disabled, uploads runner-only secrets, enables sign-in, and independently accepts registration, media-upload, and recipe-submission flags. Recipe submissions require media uploads. The workflow verifies `/api/health` and always deletes temporary files.
 
 Required GitHub `production` environment secrets for every deployment:
 
@@ -228,39 +251,44 @@ No secret value is committed. Wrangler uploads the runner-only secret file durin
 - `/search` — advanced finder
 - `/markets` and `/markets/:country` — country discovery
 - `/categories` and `/categories/:slug` — taxonomy discovery
-- `/recipes/:slug` — recipe detail and tools
+- `/recipes/:slug` — published recipe detail and tools
 - `/recipes/:slug/cook` — guided cooking
 - `/saved`, `/shopping-list`, `/meal-plan` — private browser-local tools
-- `/recipes/new` — local draft editor and guarded contributor upload UI
+- `/recipes/new` — local editor, guarded media upload, and guarded recipe submission
+- `/account/submissions` — contributor-owned private submission status
 - `/login`, `/register`, `/verify-email`, `/account` — fail-closed D1 account routes
-- `/admin/media` — editor/admin private moderation queue
+- `/admin/media` — editor/admin private media queue
+- `/admin/recipes` and `/admin/recipes/:id` — editor/admin private recipe review
 - `/media/:key` — D1 approval-gated R2 delivery
 - `/api/media/intents`, `/api/media/upload`, `/api/media/mine` — private contributor media APIs
-- `/api/media/:id/moderate` — editor/admin moderation API
+- `/api/media/:id/moderate` — editor/admin media transition API
+- `/api/recipes/submissions` — protected atomic contributor submission
+- `/api/recipes/:id/editorial` — protected editorial publication/archive transition
 - `/terms` and `/privacy` — current policy drafts/disclosure
 - `/offline`, `/manifest.webmanifest`, `/sw.js` — offline/install foundation
-- `/api/recipes` and `/api/recipes/validate` — recipe APIs
+- `/api/recipes` and `/api/recipes/validate` — public read and draft-validation APIs
 - `/api/auth/*` — CSRF, Turnstile, D1, KV, and audit-protected account APIs
-- `/api/health` — runtime, binding, catalogue, account, and non-secret media readiness
+- `/api/health` — runtime, binding, catalogue, account, media, and recipe-submission readiness
 
 ## Activation documentation
 
 - `docs/CLOUDFLARE_SETUP.md` — Cloudflare/GitHub deployment and D1 boundaries
-- `docs/D1_AUTH_SETUP.md` — D1 authentication architecture, environment values, webhook contract, activation order, testing, and rollback
-- `docs/MEDIA_PIPELINE.md` — upload validation, moderation, delivery rules, activation order, testing, and current boundaries
+- `docs/D1_AUTH_SETUP.md` — D1 authentication architecture, environment values, activation order, testing, and rollback
+- `docs/MEDIA_PIPELINE.md` — upload validation, moderation, delivery rules, testing, and current boundaries
+- `docs/RECIPE_EDITORIAL.md` — atomic submission, ownership checks, publication rules, audit history, testing, and rollback
 - `docs/IMPLEMENTATION_STATUS.md` — completed and remaining scope
 
 ## Current activation state
 
-No D1 database, account flag, registration flag, media-upload flag, administrator account, contributor upload, moderation decision, production deployment, or repository merge was changed by this branch work.
+No D1 database, account flag, registration flag, media-upload flag, recipe-submission flag, administrator account, contributor upload, recipe submission, moderation decision, publication, production deployment, or repository merge was changed by this branch work.
 
 ## Remaining production phases
 
-1. Configure a non-production Cloudflare environment and run the guarded D1/account/media test matrices.
+1. Configure a non-production Cloudflare environment and run the guarded D1/account/media/recipe test matrices.
 2. Approve legal policies and connect the verification sender/webhook.
 3. Provision initial operational administrator/editor credentials through a controlled process.
 4. Add privacy-safe image derivatives, metadata stripping, orientation normalisation, and optional automated scanning before serving transformed media at scale.
-5. Implement D1-backed recipe submission, ownership checks, editorial review, and publishing transactions.
+5. Add contributor editing after submission, editor-requested changes, resubmission, scheduled publishing, published-recipe revisions, and archive restoration.
 6. Add account-synchronised kitchen data, ratings, reviews, comments, and collections.
 7. Add password reset, email change, deletion, and account administration interfaces using the prepared tables.
 8. Add nutrition administration, queued jobs, search indexing, recommendations, analytics, and advertising controls.
