@@ -8,3 +8,6 @@ dist/
 !.env.example
 worker-configuration.d.ts
 .DS_Store
+.auth-secrets.json
+.wrangler.auth.json
+.bootstrap-admin.sql
