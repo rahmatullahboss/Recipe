@@ -74,9 +74,11 @@ const editorial = user.role === "editor" || user.role === "admin";
 
         <section class="account-panel" aria-labelledby="publishing-heading">
           <h2 id="publishing-heading">Contributor access</h2>
-          <p class="auth-help">The draft editor can request a one-time upload authorization, validate JPEG/PNG/WebP bytes, store the original privately in R2, and attach the pending asset to the local recipe draft. Public delivery still requires editorial approval.</p>
+          <p class="auth-help">The guarded editor can upload a private hero image and commit a validated recipe, taxonomy, ingredients, and directions to the D1 review queue in one transaction. Public delivery still requires separate media and recipe approval.</p>
           <div class="filter-actions">
-            <a class="button" href="/recipes/new">Open draft editor</a>
+            <a class="button" href="/recipes/new">Open recipe editor</a>
+            <a class="button button--ghost" href="/account/submissions">Your submissions</a>
+            {editorial && <a class="button button--ghost" href="/admin/recipes">Review recipe queue</a>}
             {editorial && <a class="button button--ghost" href="/admin/media">Review media queue</a>}
           </div>
         </section>
