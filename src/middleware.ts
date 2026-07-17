@@ -21,6 +21,7 @@ const privatePaths = new Set([
   "/login",
   "/register",
   "/account",
+  "/verify-email",
   "/saved",
   "/meal-plan",
   "/shopping-list",
@@ -28,6 +29,7 @@ const privatePaths = new Set([
   "/api/auth/login",
   "/api/auth/register",
   "/api/auth/logout",
+  "/api/auth/verify-email",
   "/api/recipes/validate",
 ]);
 
