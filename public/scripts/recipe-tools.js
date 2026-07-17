@@ -137,8 +137,17 @@ function initialiseRecipeTools(root) {
   const servingOutput = root.querySelector("[data-serving-output]");
   const measurementButtons = [...root.querySelectorAll("[data-measurement-system]")];
   const ingredients = [...root.querySelectorAll("[data-ingredient]")];
+  const feedback = root.querySelector("[data-recipe-feedback]");
   const originalServings = Number(root.dataset.originalServings || "1");
   let system = root.dataset.defaultSystem || "original";
+  let feedbackTimer;
+
+  function showFeedback(message) {
+    if (!feedback) return;
+    window.clearTimeout(feedbackTimer);
+    feedback.textContent = message;
+    feedbackTimer = window.setTimeout(() => { feedback.textContent = ""; }, 3000);
+  }
 
   function update() {
     const desiredServings = Math.max(Number(servingInput?.value || originalServings), 0.5);
@@ -170,6 +179,15 @@ function initialiseRecipeTools(root) {
     }
   }
 
+  function currentIngredients() {
+    return ingredients.map((ingredient) => ({
+      item: ingredient.dataset.item || "",
+      note: ingredient.dataset.note || "",
+      amount: ingredient.querySelector("[data-converted-amount]")?.textContent?.trim() || ingredient.dataset.amount || "",
+      unit: ingredient.querySelector("[data-converted-unit]")?.textContent?.trim() || ingredient.dataset.unit || "",
+    }));
+  }
+
   servingInput?.addEventListener("input", update);
   servingInput?.addEventListener("change", update);
   for (const button of measurementButtons) {
@@ -178,6 +196,32 @@ function initialiseRecipeTools(root) {
       update();
     });
   }
+
+  root.querySelector("[data-add-shopping]")?.addEventListener("click", () => {
+    const kitchen = window.OzzylKitchen;
+    if (!kitchen) return showFeedback("Shopping list is unavailable in this browser.");
+    const added = kitchen.addShoppingItems({
+      slug: root.dataset.recipeSlug,
+      title: root.dataset.recipeTitle,
+      ingredients: currentIngredients(),
+    });
+    showFeedback(added > 0
+      ? `${added} ingredient${added === 1 ? "" : "s"} added to your shopping list.`
+      : "These ingredients are already on your shopping list.");
+  });
+
+  root.querySelector("[data-plan-recipe]")?.addEventListener("click", () => {
+    const kitchen = window.OzzylKitchen;
+    if (!kitchen) return showFeedback("Meal planning is unavailable in this browser.");
+    const dateKey = kitchen.addMealToNextOpenDay({
+      slug: root.dataset.recipeSlug,
+      title: root.dataset.recipeTitle,
+      image: root.dataset.recipeImage,
+    });
+    if (!dateKey) return showFeedback("The next two weeks are already fully planned.");
+    const plannedDate = new Date(`${dateKey}T12:00:00`);
+    showFeedback(`Added to ${plannedDate.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}.`);
+  });
 
   root.querySelector("[data-print-recipe]")?.addEventListener("click", () => window.print());
   root.querySelector("[data-copy-recipe]")?.addEventListener("click", async (event) => {
