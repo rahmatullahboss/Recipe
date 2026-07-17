@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { fallbackRecipes } from "../../data/fallback-recipes";
 import { getAuthReadiness } from "../../lib/auth";
 import { hasDatabase } from "../../lib/db";
+import { getEditorRecipeChangeSetReadiness } from "../../lib/editor-recipe-change-sets";
 import { markets } from "../../lib/market";
 import { getMediaReadiness } from "../../lib/media";
 import { getMediaDerivativeReadiness } from "../../lib/media-derivatives";
@@ -29,6 +30,7 @@ export const GET: APIRoute = async () => {
   const recipeSubmissions = getRecipeSubmissionReadiness();
   const publicationWorkflow = getRecipePublicationWorkflowReadiness();
   const publishedChangeSets = getPublishedRecipeChangeSetReadiness();
+  const editorChangeSets = getEditorRecipeChangeSetReadiness();
 
   return Response.json(
     {
@@ -115,6 +117,13 @@ export const GET: APIRoute = async () => {
         publishedChangeSetApprovalMediaRevalidation: publishedChangeSets.approvalMediaRevalidation,
         publishedChangeSetAtomicPromotion: publishedChangeSets.atomicRelationalPromotion,
         publishedChangeSetAuditEvents: publishedChangeSets.immutableAuditEvents,
+        editorAuthoredPublishedChangeSets: editorChangeSets.editorAuthoredChangeSets,
+        historicalSnapshotRestore: editorChangeSets.historicalSnapshotRestore,
+        editorChangeSetOriginAudit: editorChangeSets.immutableOriginAudit,
+        editorChangeSetContributorDraftLock: editorChangeSets.contributorDraftLock,
+        editorChangeSetCurrentLiveBaseline: editorChangeSets.currentLiveBaseline,
+        historicalSnapshotMediaFallback: editorChangeSets.snapshotMediaFallback,
+        editorChangeSetSharedAtomicApproval: editorChangeSets.sharedAtomicApproval,
       },
       timestamp: new Date().toISOString(),
     },
