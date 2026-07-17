@@ -15,7 +15,7 @@ INSERT INTO categories (id, name, slug, type, sort_order) VALUES
 
 INSERT INTO recipes (
   id, author_id, title, slug, summary, description, image_url,
-  country_code, language_code, prep_minutes, cook_minutes, servings, difficulty,
+  country_code, language_code, measurement_system, prep_minutes, cook_minutes, servings, difficulty,
   status, is_featured, average_rating, rating_count, save_count, view_count, published_at
 ) VALUES
   (
@@ -23,28 +23,28 @@ INSERT INTO recipes (
     'Crisp-edged, chewy-centred cookies with plenty of chocolate in every bite.',
     'A dependable American-style cookie recipe developed for repeatable results.',
     'https://images.unsplash.com/photo-1499636136210-6f4ee915583e?auto=format&fit=crop&w=1400&q=84',
-    'US', 'en', 20, 12, 18, 'easy', 'published', 1, 4.9, 384, 2410, 28600, CURRENT_TIMESTAMP
+    'US', 'en', 'us', 20, 12, 18, 'easy', 'published', 1, 4.9, 384, 2410, 28600, CURRENT_TIMESTAMP
   ),
   (
     'recipe-gb-cottage-pie', 'user-editor-1', 'Traditional Cottage Pie', 'traditional-cottage-pie',
     'Rich minced beef and vegetables under a golden, buttery mashed-potato topping.',
     'A classic British comfort-food dinner with a deeply savoury filling.',
     'https://images.unsplash.com/photo-1574894709920-11b28e7367e3?auto=format&fit=crop&w=1400&q=84',
-    'GB', 'en', 25, 55, 6, 'medium', 'published', 1, 4.8, 219, 1320, 19400, CURRENT_TIMESTAMP
+    'GB', 'en', 'metric', 25, 55, 6, 'medium', 'published', 1, 4.8, 219, 1320, 19400, CURRENT_TIMESTAMP
   ),
   (
     'recipe-fr-chicken-provencal', 'user-editor-1', 'Chicken Provençal', 'chicken-provencal',
     'Chicken braised with tomatoes, olives, garlic, and herbs from southern France.',
     'A rustic French one-pan meal with bright Mediterranean flavour.',
     'https://images.unsplash.com/photo-1532550907401-a500c9a57435?auto=format&fit=crop&w=1400&q=84',
-    'FR', 'en', 20, 45, 4, 'medium', 'published', 1, 4.7, 112, 870, 10800, CURRENT_TIMESTAMP
+    'FR', 'en', 'metric', 20, 45, 4, 'medium', 'published', 1, 4.7, 112, 870, 10800, CURRENT_TIMESTAMP
   ),
   (
     'recipe-au-chicken-parmigiana', 'user-editor-1', 'Australian Chicken Parmigiana', 'australian-chicken-parmigiana',
     'Crunchy chicken schnitzel topped with tomato sauce, ham, and bubbling cheese.',
     'An Australian pub favourite made at home with a crisp crumb.',
     'https://images.unsplash.com/photo-1604908176997-125f25cc6f3d?auto=format&fit=crop&w=1400&q=84',
-    'AU', 'en', 25, 30, 4, 'medium', 'published', 1, 4.8, 146, 980, 13200, CURRENT_TIMESTAMP
+    'AU', 'en', 'metric', 25, 30, 4, 'medium', 'published', 1, 4.8, 146, 980, 13200, CURRENT_TIMESTAMP
   );
 
 INSERT INTO recipe_categories (recipe_id, category_id) VALUES
