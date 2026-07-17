@@ -16,13 +16,20 @@ function safeWrite(key, value) {
 }
 
 function createId(prefix = "item") {
-  return typeof crypto?.randomUUID === "function"
-    ? `${prefix}-${crypto.randomUUID()}`
+  return typeof window.crypto?.randomUUID === "function"
+    ? `${prefix}-${window.crypto.randomUUID()}`
     : `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function normaliseText(value) {
   return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function localDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function readShoppingItems() {
@@ -114,7 +121,7 @@ function addMealToNextOpenDay(meal) {
   for (let offset = 0; offset < 14; offset += 1) {
     const date = new Date(today);
     date.setDate(today.getDate() + offset);
-    const key = date.toISOString().slice(0, 10);
+    const key = localDateKey(date);
     if (!plan[key]) {
       setMeal(key, meal);
       return key;
