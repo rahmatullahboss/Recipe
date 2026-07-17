@@ -64,6 +64,7 @@ The account implementation is complete in code but disabled by default until D1 
 - Single-use 30-minute email verification
 - Authenticated verification-email webhook with failed-delivery rollback
 - D1 consent history, OAuth extension tables, and privacy-preserving audit events
+- Audited registration, login, verification, and logout outcomes without storing raw IP or full user-agent values
 - Independent fail-closed flags for sign-in and registration
 - Non-secret readiness details in `/api/health`
 
@@ -163,22 +164,40 @@ npm run db:migrate:local
 npm run build:d1
 ```
 
-Keep account flags disabled unless the local D1, KV, Turnstile test values, password peppers, and verification webhook are intentionally configured.
+Keep account flags disabled unless the local D1, KV, Turnstile test values, independent peppers, and verification webhook are intentionally configured.
 
 ## GitHub Actions
 
 - `.github/workflows/ci.yml` validates catalogue, browser scripts, authoritative migrations, authentication invariants, Cloudflare types, and the Worker build.
 - `.github/workflows/deploy.yml` deploys the D1-free Worker from `main` and verifies static mode plus KV/R2/Images bindings.
-- `.github/workflows/enable-d1.yml` requires the exact `ENABLE_D1` confirmation before provisioning D1, applying migrations, and verifying D1 mode.
+- `.github/workflows/enable-d1.yml` requires the exact `ENABLE_D1` confirmation before provisioning D1, applying migrations, and verifying D1 mode with authentication disabled.
+- `.github/workflows/enable-auth.yml` requires the exact `ENABLE_AUTH` confirmation, applies pending migrations while auth is disabled, uploads secrets from runner-only files, enables sign-in, optionally enables registration, verifies `/api/health`, and deletes temporary files.
 
-Required GitHub `production` environment secrets for deployment:
+Required GitHub `production` environment secrets for every deployment:
 
 ```text
 CLOUDFLARE_ACCOUNT_ID
 CLOUDFLARE_API_TOKEN
 ```
 
-Account secrets are configured later as Cloudflare Worker secrets and are never committed.
+The guarded authentication workflow additionally reads these environment secrets:
+
+```text
+AUTH_PASSWORD_PEPPER
+AUTH_FINGERPRINT_PEPPER
+TURNSTILE_SECRET_KEY
+AUTH_EMAIL_WEBHOOK_TOKEN        # only when public registration is enabled
+```
+
+It also reads these GitHub environment variables:
+
+```text
+TURNSTILE_SITE_KEY
+AUTH_EMAIL_WEBHOOK_URL          # only when public registration is enabled
+AUTH_FROM_EMAIL                 # optional
+```
+
+No secret value is committed. Wrangler 4.111 uploads the runner-only JSON secret file during the final deployment, and the cleanup step runs even after a failed workflow step.
 
 ## Important routes
 
@@ -194,20 +213,20 @@ Account secrets are configured later as Cloudflare Worker secrets and are never 
 - `/terms` and `/privacy` — current policy drafts/disclosure
 - `/offline`, `/manifest.webmanifest`, `/sw.js` — offline/install foundation
 - `/api/recipes` and `/api/recipes/validate` — recipe APIs
-- `/api/auth/*` — CSRF, Turnstile, D1, and KV protected account APIs
+- `/api/auth/*` — CSRF, Turnstile, D1, KV, and audit-protected account APIs
 - `/api/health` — runtime, binding, catalogue, and non-secret auth readiness
 
 ## Activation documentation
 
 - `docs/CLOUDFLARE_SETUP.md` — Cloudflare/GitHub deployment and D1 boundaries
-- `docs/D1_AUTH_SETUP.md` — exact D1 authentication secrets, webhook contract, activation order, testing, and rollback
+- `docs/D1_AUTH_SETUP.md` — exact D1 authentication architecture, values, webhook contract, activation order, testing, and rollback
 - `docs/IMPLEMENTATION_STATUS.md` — completed and remaining scope
 
 ## Remaining production phases
 
-1. Provision D1 and run the documented authentication test matrix outside production
-2. Approve legal policies and configure the verification sender/webhook
-3. Provision initial operational administrator/editor credentials
+1. Configure a non-production Cloudflare environment and run the guarded D1/authentication test matrix
+2. Approve legal policies and connect the verification sender/webhook
+3. Provision initial operational administrator/editor credentials through a controlled process
 4. Signed R2 uploads, image delivery, and media moderation
 5. D1-backed recipe publishing and editorial review
 6. Account-synchronised kitchen data, ratings, reviews, comments, and collections
