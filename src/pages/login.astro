@@ -18,7 +18,7 @@ const next = safeNextPath(Astro.url.searchParams.get("next"));
 const errorCode = Astro.url.searchParams.get("error") ?? "";
 const verified = Astro.url.searchParams.get("verified") === "1";
 const errorMessages: Record<string, string> = {
-  invalid: "The email address or password was not accepted.",
+  invalid: "The email address or password was not accepted. Unverified accounts must confirm their email before signing in.",
   challenge: "The security challenge could not be verified. Please try again.",
   rate: "Too many sign-in attempts. Please wait before trying again.",
   request: "The sign-in request expired or was invalid. Please reload the page.",
@@ -46,7 +46,7 @@ if (readiness.ready) {
       <div class="auth-card">
         <p class="eyebrow">Member accounts</p>
         <h1 class="section-title">Sign in securely</h1>
-        <p class="section-copy">Your session is stored in an HTTP-only cookie and backed by Cloudflare KV. Browser-local saves, shopping lists, and meal plans continue working without an account.</p>
+        <p class="section-copy">Your session is stored in an HTTP-only cookie and backed by Cloudflare KV. D1 remains the source of truth for account status and session revocation.</p>
 
         {verified && (
           <div class="auth-alert auth-alert--success" role="status">Your email address has been verified. You can now sign in.</div>
@@ -59,7 +59,7 @@ if (readiness.ready) {
         {!readiness.ready ? (
           <div class="auth-alert" role="status">
             <strong>Account services are safely disabled.</strong>
-            <p>Registration and sign-in will remain closed until these production dependencies are connected:</p>
+            <p>Sign-in remains closed until these future D1 production dependencies are connected:</p>
             <ul class="auth-missing">
               {readiness.missing.map((item) => <li><code>{item}</code></li>)}
             </ul>
@@ -90,7 +90,7 @@ if (readiness.ready) {
           </form>
         )}
 
-        <p class="auth-meta">Public error messages are intentionally generic to prevent account discovery. Ten failed attempts temporarily lock further password checks.</p>
+        <p class="auth-meta">Public errors remain generic to prevent account discovery. Five failed password checks temporarily lock the account for 15 minutes.</p>
       </div>
     </div>
   </section>
