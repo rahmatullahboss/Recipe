@@ -22,6 +22,17 @@ const recipeMarket = recipe.country_code === "GLOBAL" ? "International" : getMar
     />
     {recipe.is_featured === 1 && <span class="recipe-card__badge">Editor favourite</span>}
   </a>
+  <button
+    class="save-button save-button--card"
+    type="button"
+    data-save-recipe={recipe.slug}
+    aria-pressed="false"
+    aria-label={`Save ${recipe.title}`}
+    title={`Save ${recipe.title}`}
+  >
+    <span aria-hidden="true">♡</span>
+    <span class="sr-only" data-save-label>Save</span>
+  </button>
   <div class="recipe-card__body">
     <span class="recipe-market">{recipeMarket}</span>
     <h3><a href={`/recipes/${recipe.slug}`}>{recipe.title}</a></h3>
