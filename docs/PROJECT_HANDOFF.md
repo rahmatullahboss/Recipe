@@ -10,8 +10,8 @@ Always fetch current PR metadata and each current blob SHA before writing. Docum
 - Branch: `feat/cloudflare-recipe-foundation`
 - Pull request: `#1`
 - PR remains open and unmerged.
-- Scheduled-publication implementation code reached head `15fa2ce2f2ac6aa2c823585075ed19d368b94d1f` and passed CI run `#310`.
-- Documentation and activation-hardening commits followed; recheck the current final head and its CI before continuing.
+- Private published-recipe change-set implementation reached head `e71f4b37a0af63f0e4804a7d3d911223b9a994c4` and passed CI run `#336`.
+- Documentation commits followed; fetch the exact current head and verify its CI before further work.
 
 ## Production boundary
 
@@ -24,7 +24,7 @@ The public application remains D1-free. Checked-in D1 configuration keeps every 
 "RECIPE_SUBMISSIONS_ENABLED": "false"
 ```
 
-No deployment, D1 activation, account provisioning, real upload, real recipe creation/submission/scheduling/publication, moderation decision, archive restoration, merge, or production change was performed.
+No deployment, D1 activation, account provisioning, real upload, real recipe creation/submission/change-set operation/scheduling/publication, moderation decision, archive restoration, merge, or production change was performed.
 
 ## Completed platform foundation
 
@@ -58,9 +58,9 @@ No deployment, D1 activation, account provisioning, real upload, real recipe cre
 - Original bytes never served by `/media`
 - Owner/editor derivative-only `private, no-store` previews
 - Public delivery only for uploaded/approved parents with complete current derivatives
-- Guarded regeneration and rejection/quarantine/deletion cleanup
+- Guarded regeneration, cross-table media reservation, and rejection/quarantine/deletion cleanup
 
-### Contributor and editorial recipes
+### Initial contributor/editorial recipes
 
 - Atomic first submission into private `review`
 - Public D1 reads restricted to `published`
@@ -71,116 +71,100 @@ No deployment, D1 activation, account provisioning, real upload, real recipe cre
 - Immutable `recipe_revision_snapshots`
 - Final publication rechecks complete content, approved media, source checksum, derivative policy, and required derivative matrix
 
-## Scheduled publication and archive restoration completed
+### Scheduled publication and archive restoration
 
-### Migration `0009_recipe_publication_workflow`
+Migration `0009_recipe_publication_workflow` adds future UTC schedule/replace/cancel, `schedule_revision`, due/archived indexes, archive/restore timestamps, and `recipe_publication_events`.
 
-Adds:
+- Scheduled recipes remain private in `review`.
+- Active schedule requires `schedule_revision = revision`.
+- Immediate and due publication repeat complete content/media/checksum/derivative gates in the final D1 update.
+- `POST /api/recipes/scheduled/process` is editor/admin, same-origin, purpose/session-CSRF protected, bounded, deterministic, and idempotent.
+- Archive clears schedule state.
+- Restore is only `archived → review` and never republishes directly.
+- Automatic Cron/queue execution is not configured.
 
-- `recipes.scheduled_publish_at`
-- `recipes.scheduled_by`
-- `recipes.schedule_revision`
-- `recipes.archived_at`
-- `recipes.restored_at`
-- due-schedule and archived-operation indexes
-- `recipe_publication_events`
+## Private published-recipe change sets completed
 
-Publication event actions are:
+Migration `0010_published_recipe_change_sets` adds:
 
-```text
-schedule
-cancel_schedule
-published_now
-scheduled_published
-archive
-restore
-```
+- `recipe_change_sets`;
+- `recipe_change_set_events`;
+- exact `base_recipe_revision` and `base_content_revision`;
+- private `base_content_json` and proposed `content_json`;
+- one-active-change-set-per-recipe uniqueness;
+- active media reservation uniqueness;
+- contributor/editor queue indexes;
+- published-owner triggers;
+- cross-table recipe/change-set media reservation triggers.
 
-### Schedule model
+### Live-row isolation
 
-A scheduled recipe remains private in `review`. An active schedule requires:
-
-```text
-scheduled_publish_at is not null
-schedule_revision = revision
-```
-
-Scheduling or replacing a schedule increments recipe revision and stores the resulting value in `schedule_revision`. Any later recipe transition invalidates the old schedule through revision mismatch.
-
-Schedule times are UTC, at least five minutes in the future, and no more than one year ahead.
-
-### Immediate and due publication gates
-
-Both paths repeat these checks in the final conditional D1 update:
-
-- status is still `review`;
-- optimistic recipe revision matches;
-- schedule revision/time match for due processing;
-- at least two ingredients;
-- at least two directions;
-- at least one category;
-- media is uploaded and approved;
-- derivative job matches current source checksum and `recipe-images-v1`;
-- all required JPEG/WebP variants are ready.
-
-Concurrent content, media, checksum, derivative, schedule, or status changes return conflict instead of publishing stale content.
-
-### Guarded manual processor
-
-Route:
+A contributor update to an already published recipe is never written into the live recipe while drafting or reviewing.
 
 ```text
-POST /api/recipes/scheduled/process
+published live recipe remains unchanged
+  └─ private change set: draft
+       → review
+       → changes_requested → review
+       → approved and atomically promoted
+       → or cancelled
 ```
 
-Requires:
+Create/save/submit/request-changes/cancel modify only private change-set state and audit history.
 
-- verified session;
-- editor/admin role;
-- same-origin request;
-- purpose-bound `recipe-schedule-process` CSRF;
-- current session CSRF;
-- limit between 1 and 25;
-- complete recipe pipeline readiness.
+### Contributor surfaces
 
-Due rows use deterministic time/ID ordering. Each recipe uses its own atomic D1 batch. Successful promotion clears schedule state and increments revision; re-running is idempotent.
+- `/account/submissions`
+- `/account/submissions/:id/change-set`
+- `POST /api/recipes/:id/change-set`
 
-Automatic Cloudflare Cron or queue execution is intentionally not configured. Health reports `automaticScheduleCronConfigured=false`.
+Contributor actions are `create`, `save`, `submit`, and `cancel`. They require verified ownership, same-origin request, purpose/session CSRF, rate/body limits, canonical validation, matching optimistic change-set revision, exact live base revisions, valid categories, and eligible non-conflicting media.
 
-### Archive restoration
+### Editorial surfaces
 
-Archiving a review recipe clears schedule state and records `archived_at` plus publication audit history.
+- `/admin/recipe-change-sets`
+- `/admin/recipe-change-sets/:id`
+- `POST /api/recipe-change-sets/:id/editorial`
 
-Restoration is only:
+Editorial actions are `request_changes`, `approve`, and `cancel`. The private detail compares baseline/proposed scalar fields, categories, ingredients, directions, media, notes, revisions, and audit events.
 
-```text
-archived → review
-```
+### Atomic promotion
 
-It requires editor/admin reason and expected revision, clears schedule/write-token state, records `restored_at`, and never republishes directly.
+Approval revalidates:
 
-### Admin surfaces
+- change-set review status/revision;
+- live recipe still `published`;
+- exact base recipe/content revisions;
+- canonical proposed JSON and categories;
+- proposed media ownership, uploaded/approved state, current checksum, `recipe-images-v1` derivative policy, and complete mandatory variants;
+- no conflicting media assignment/reservation.
 
-- `/admin/recipes` — review queue, active schedules, archived operations, manual due processor
-- `/admin/recipes/:id` — publish now, schedule/replace, cancel schedule, request changes, archive, restore to review, and publication history
-- `/api/recipes/:id/editorial` — guarded workflow actions
-- `/api/recipes/scheduled/process` — guarded manual due processor
+One D1 batch acquires a unique `revision_write_token`, updates live scalar/media fields while preserving `published`, increments recipe/content revisions, clears stale scheduling, guardedly replaces categories/ingredients/directions, approves the change set, records the resulting recipe revision/audit event, and clears the token.
 
-All remain private/no-store/noindex where applicable.
+A stale first update causes every relational statement to no-op. Any failed statement rolls back the complete batch. Public content cannot be partially replaced.
+
+### Media reservation
+
+Active proposed media cannot be assigned to another recipe/change set or deleted. Cross-table D1 triggers protect existing submission/revision paths, and the media delete endpoint checks both live recipe assignments and active change-set reservations.
 
 ## Health and activation hardening
 
-`/api/health` reports:
+`/api/health` reports non-secret capabilities for:
 
-- scheduled publishing
-- guarded schedule processor
-- archive restoration
-- schedule revision guard
-- scheduled media revalidation
-- atomic scheduled promotion
-- automatic schedule cron disabled
+- scheduled publishing and guarded manual processing;
+- archive restoration;
+- schedule revision/media/atomic promotion gates;
+- automatic schedule cron disabled;
+- live published-row isolation;
+- one active published change set;
+- private baseline/proposed snapshots;
+- change-set optimistic and base guards;
+- media reservation;
+- approval-time media/derivative revalidation;
+- atomic normalized promotion;
+- immutable change-set audit events.
 
-The guarded authentication workflow checks these capabilities when recipe writes are requested. It fails closed if any capability is missing or automatic cron is unexpectedly enabled.
+The guarded authentication workflow fails closed if recipe writes are requested while any required capability is absent.
 
 ## Authoritative migration chain
 
@@ -194,23 +178,24 @@ migrations/d1/0006_recipe_editorial/migration.sql
 migrations/d1/0007_recipe_revisions/migration.sql
 migrations/d1/0008_media_derivatives/migration.sql
 migrations/d1/0009_recipe_publication_workflow/migration.sql
+migrations/d1/0010_published_recipe_change_sets/migration.sql
 ```
 
 Wrangler applies only this nested sequence. Root SQL files remain legacy references.
 
 ## Validation evidence
 
-Implementation head `15fa2ce2f2ac6aa2c823585075ed19d368b94d1f` passed GitHub Actions CI run `#310`:
+Implementation head `e71f4b37a0af63f0e4804a7d3d911223b9a994c4` passed GitHub Actions CI run `#336`:
 
 - checkout and Node.js 24 setup;
 - locked dependency installation;
-- project/security/publication validation;
+- project/security/change-set validation;
 - operational script validation;
-- all nine local D1 migrations;
+- all ten local D1 migrations;
 - D1-free Worker build;
 - D1 Worker build.
 
-After documentation/hardening updates, verify CI again on the exact current PR head before continuing.
+After documentation updates, verify CI again on the exact current PR head before continuing.
 
 ## Documentation
 
@@ -223,17 +208,19 @@ After documentation/hardening updates, verify CI again on the exact current PR h
 - `docs/MEDIA_DERIVATIVE_ROLLBACK.md`
 - `docs/RECIPE_EDITORIAL.md`
 - `docs/RECIPE_PUBLICATION_WORKFLOW.md`
+- `docs/PUBLISHED_RECIPE_CHANGE_SETS.md`
 
-## Remaining boundaries and next recommended phase
+## Remaining boundaries and recommended next work
 
-1. Execute controlled non-production acceptance for media derivatives, submissions, revisions, scheduling, archive/restore, concurrency, and rollback.
-2. Add private change sets for contributor revisions of already published recipes. The live `published` row must remain unchanged until atomic editorial promotion.
-3. Add editor-authored content editing and snapshot restore.
-4. Add optional Cron/queue scheduling only after the manual processor and incident procedures are accepted.
-5. Add malware/semantic scanning and approved retention/legal policies.
-6. Add account lifecycle and synchronized kitchen/community features.
+1. Execute controlled non-production acceptance for media derivatives, submissions, corrections, scheduling, archive/restore, private published change sets, media reservations, concurrency, and rollback.
+2. Add editor-authored private change sets using the same live-row isolation and atomic promotion guarantees.
+3. Restore a historical recipe snapshot into a new private change set.
+4. Add richer three-way conflict comparison or merge assistance without weakening optimistic rejection.
+5. Add optional Cron/queue scheduling only after manual processor and incident procedures are accepted.
+6. Add malware/semantic scanning and approved retention/legal policies.
+7. Add account lifecycle and synchronized kitchen/community features.
 
-Published-recipe revisions are not yet implemented. Do not reuse the owner-only requested-change `draft` state to mutate a live published row.
+Do not directly mutate a live published recipe for future editor or snapshot-restoration features.
 
 ## Continuation rules
 
@@ -242,8 +229,8 @@ Published-recipe revisions are not yet implemented. Do not reuse the owner-only 
 3. Fetch the current blob SHA immediately before every existing-file update.
 4. Do not make no-op updates or update one path concurrently.
 5. Keep all four checked-in flags false.
-6. Do not deploy, activate D1, provision accounts, upload media, create/schedule/publish recipes, moderate, restore real content, merge, or change production unless explicitly requested.
-7. Preserve ownership, approved derivative delivery, private no-store previews, published-only public reads, checksums/ETags, generation leases, schedule revisions, optimistic locking, and atomic D1 safety.
+6. Do not deploy, activate D1, provision accounts, upload media, create/revise/schedule/publish real recipes, moderate, restore real content, merge, or change production unless explicitly requested.
+7. Preserve ownership, approved derivative delivery, private no-store previews, published-only public reads, checksums/ETags, generation leases, media reservations, schedule revisions, optimistic base guards, and atomic D1 safety.
 8. Run and verify CI on the final head.
 
 ## Ready-to-paste continuation prompt
@@ -257,7 +244,9 @@ Pull request: #1
 
 Fetch the current PR head and current file blob SHAs before writing. Read README.md and every document referenced by docs/PROJECT_HANDOFF.md.
 
-The project now includes Astro 7/Cloudflare international discovery, D1-free fallback data, cooking/planning/offline tools, guarded authentication, private R2 originals, privacy-safe responsive derivatives, approval-gated derivative-only delivery, atomic recipe submission, requested changes, owner-only race-safe resubmission, immutable snapshots, immediate publication, future UTC scheduling, guarded manual due processing, audit history, and archive restoration through migration 0009.
+The project includes Astro 7/Cloudflare international discovery, D1-free fallback data, cooking/planning/offline tools, guarded authentication, private R2 originals, privacy-safe responsive derivatives, approval-gated derivative-only delivery, atomic initial recipe submission, requested corrections, immutable snapshots, immediate/future publication, guarded manual due processing, archive restoration, and private contributor change sets for already published recipes through migration 0010.
 
-Continue with controlled runtime acceptance and private change sets for contributor revisions of already published recipes. Preserve the live published row until atomic promotion. Keep all checked-in flags false; do not deploy, activate, provision, upload, moderate, schedule/publish real content, merge, or change production. Verify CI on the final head.
+Private published change sets keep the live published row unchanged during drafting/review, reserve proposed media, capture exact base recipe/content revisions, and use approval-time media/derivative revalidation plus revision_write_token-guarded atomic normalized promotion.
+
+Continue with controlled runtime acceptance, editor-authored private change sets, or restoring historical snapshots into new private change sets. Keep all checked-in flags false; do not deploy, activate, provision, upload, moderate, create/revise/schedule/publish real content, merge, or change production. Verify CI on the final head.
 ```
