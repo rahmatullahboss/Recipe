@@ -1,0 +1,37 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import RecipeCard from "../../components/RecipeCard.astro";
+import { listRecipes } from "../../lib/db";
+import { getMarket, isSupportedMarket } from "../../lib/market";
+
+const country = Astro.params.country?.toUpperCase();
+if (!country || !isSupportedMarket(country)) {
+  return Astro.redirect("/404", 302);
+}
+
+const market = getMarket(country);
+const recipes = await listRecipes({ country: market.code, limit: 24 });
+---
+
+<BaseLayout
+  title={`${market.name} Recipes — Ozzyl Recipes`}
+  description={`Discover recipes prioritised for ${market.name}, with access to the wider international Ozzyl Recipes catalogue.`}
+>
+  <section class="section">
+    <div class="container">
+      <p class="eyebrow">{market.locale} · {market.measurementSystem === "us" ? "US measurements" : "Metric measurements"}</p>
+      <h1 class="section-title">Recipes for {market.name}</h1>
+      <p class="section-copy">Recipes associated with {market.name} are ranked first. International favourites follow so you can keep exploring beyond one cuisine or country.</p>
+
+      <form class="search-box" action="/search" method="get">
+        <input type="hidden" name="country" value={market.code} />
+        <input name="q" type="search" placeholder={`Search recipes for ${market.name}...`} aria-label={`Search recipes for ${market.name}`} />
+        <button class="button" type="submit">Search this market</button>
+      </form>
+
+      <div class="recipe-grid" style="margin-top:42px">
+        {recipes.map((recipe) => <RecipeCard recipe={recipe} />)}
+      </div>
+    </div>
+  </section>
+</BaseLayout>
