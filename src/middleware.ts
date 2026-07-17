@@ -1,5 +1,6 @@
 import { defineMiddleware } from "astro:middleware";
-import { getAuthContext, getAuthReadiness } from "./lib/auth";
+import { getAuthContext } from "./lib/auth";
+import { getAuthRuntimeStatus } from "./lib/auth/runtime";
 
 const contentSecurityPolicy = [
   "default-src 'self'",
@@ -38,7 +39,7 @@ function isPrivatePath(pathname: string): boolean {
 }
 
 export const onRequest = defineMiddleware(async (context, next) => {
-  const readiness = getAuthReadiness();
+  const readiness = getAuthRuntimeStatus();
   context.locals.authReady = readiness.ready;
 
   try {
