@@ -3,16 +3,11 @@
   "name": "ozzyl-recipes",
   "main": "@astrojs/cloudflare/entrypoints/server",
   "compatibility_date": "2026-07-17",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS"
   },
-  "d1_databases": [
-    {
-      "binding": "DB"
-    }
-  ],
   "r2_buckets": [
     {
       "binding": "MEDIA"
@@ -28,9 +23,10 @@
   },
   "vars": {
     "SITE_NAME": "Ozzyl Recipes",
-    "PUBLIC_SITE_URL": "http://localhost:4321"
+    "DATA_MODE": "static"
   },
   "observability": {
-    "enabled": true
+    "enabled": true,
+    "head_sampling_rate": 1
   }
 }
