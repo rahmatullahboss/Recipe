@@ -56,12 +56,19 @@ Draft images and public publishing remain disabled until authentication, Turnsti
 - Cuisine and category metadata
 - Dynamic sitemap and robots endpoints
 - Crawlable market and category pages
+- Real HTTP 404 responses for unknown recipes, categories, and markets
 - Personal/editor routes marked `noindex`
 - Astro middleware security headers
 - Content Security Policy
 - HSTS on HTTPS
 - Frame, MIME-sniffing, referrer, permissions, and cross-origin protections
 - Private routes and validation endpoints use `no-store`
+
+### Integrity and operations
+
+- Dependency-free validation of catalogue IDs, slugs, market coverage, taxonomy references, ingredient/step ordering, and D1 migration order
+- Runtime health diagnostics for data mode, market coverage, and Cloudflare binding readiness
+- Credentialed deployment smoke tests for expected data mode and KV/R2/Images/D1 bindings
 
 ## Cloudflare architecture
 
@@ -88,6 +95,7 @@ Draft images and public publishing remain disabled until authentication, Turnsti
 
 ```bash
 npm ci
+npm run validate
 npm run build
 npm run deploy
 ```
@@ -110,6 +118,7 @@ Requirements: Node.js 22 or newer. GitHub CI uses Node.js 24.
 
 ```bash
 npm ci
+npm run validate
 npm run dev
 ```
 
@@ -124,9 +133,9 @@ npm run build:d1
 
 ## GitHub Actions
 
-- `.github/workflows/ci.yml` validates locked dependency installation, Cloudflare type generation, and the Astro production Worker build.
-- `.github/workflows/deploy.yml` deploys the D1-free Worker after changes reach `main` and smoke-tests `/api/health`.
-- `.github/workflows/enable-d1.yml` is manually triggered and requires typing `ENABLE_D1` before provisioning D1, applying migrations, and deploying the database configuration.
+- `.github/workflows/ci.yml` validates the catalogue and migrations, installs locked dependencies, generates Cloudflare types, and builds the Astro Worker.
+- `.github/workflows/deploy.yml` deploys the D1-free Worker after changes reach `main`, then verifies static data mode, ten markets, and KV/R2/Images bindings.
+- `.github/workflows/enable-d1.yml` is manually triggered and requires typing `ENABLE_D1` before provisioning D1, applying migrations, deploying, and verifying database mode and all bindings.
 
 Required GitHub `production` environment secrets:
 
@@ -147,7 +156,7 @@ See `docs/CLOUDFLARE_SETUP.md` for exact Cloudflare permissions and GitHub setup
 - `/api/recipes` — filtered recipe JSON API
 - `/api/recipes/validate` — contributor draft validation API
 - `/api/location` — persistent market selection
-- `/api/health` — runtime and active data-mode health check
+- `/api/health` — runtime, catalogue, and binding health diagnostics
 - `/sitemap.xml` and `/robots.txt` — discovery controls
 
 Example API request:
