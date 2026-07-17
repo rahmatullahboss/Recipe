@@ -59,6 +59,8 @@ Migration `0006_recipe_editorial` adds `recipe_editorial_events` plus D1 trigger
 
 Middleware applies `private, no-store` to these routes. Robots rules disallow account, admin, and API paths.
 
+The current contributor status page is deliberately compact and returns only the signed-in contributor's own records. Requested-change and resubmission controls belong to the next editorial phase.
+
 ## Health and rollback
 
 `/api/health` exposes non-secret recipe-submission readiness. When intentionally activated, both `recipeSubmissions.enabled` and `recipeSubmissions.ready` must be true. The guarded workflow verifies the requested flag against the deployed health response.
