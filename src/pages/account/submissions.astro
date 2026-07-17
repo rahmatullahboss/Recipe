@@ -1,9 +1,13 @@
 ---
 import BaseLayout from "../../layouts/BaseLayout.astro";
+import { getRecipeSubmissionReadiness, listContributorSubmissions } from "../../lib/recipe-submissions";
 
 if (!Astro.locals.user || !Astro.locals.session) {
   return Astro.redirect("/login?next=%2Faccount%2Fsubmissions", 302);
 }
+
+const readiness = getRecipeSubmissionReadiness();
+const submissions = readiness.database ? await listContributorSubmissions(Astro.locals.user.id, 100) : [];
 ---
 
 <BaseLayout title="Your Recipe Submissions — Ozzyl Recipes" robots="noindex,nofollow">
@@ -11,6 +15,7 @@ if (!Astro.locals.user || !Astro.locals.session) {
     <div class="container">
       <p class="eyebrow">Contributor workspace</p>
       <h1 class="section-title">Your recipe submissions</h1>
+      <p>{submissions.length} submission{submissions.length === 1 ? "" : "s"}</p>
     </div>
   </section>
 </BaseLayout>
