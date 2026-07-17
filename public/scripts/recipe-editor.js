@@ -227,7 +227,6 @@ if (root) {
       if (rows.length > 1) target.closest("[data-step-row]").remove();
       scheduleSave();
     }
-    if (target.matches("[data-validate-draft]")) validateDraft();
     if (target.matches("[data-export-draft]")) exportDraft();
     if (target.matches("[data-clear-draft]")) {
       if (!window.confirm("Clear this local recipe draft?")) return;
