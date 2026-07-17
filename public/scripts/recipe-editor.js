@@ -1,4 +1,6 @@
 const DRAFT_STORAGE_KEY = "ozzyl:recipe-draft:v1";
+const MAX_MEDIA_BYTES = 8 * 1024 * 1024;
+const ALLOWED_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const root = document.querySelector("[data-recipe-editor]");
 
 if (root) {
@@ -12,6 +14,17 @@ if (root) {
   const previewTitle = root.querySelector("[data-preview-title]");
   const previewSummary = root.querySelector("[data-preview-summary]");
   const previewMeta = root.querySelector("[data-preview-meta]");
+  const mediaUploader = root.querySelector("[data-media-uploader]");
+  const mediaFile = root.querySelector("[data-media-file]");
+  const mediaAlt = root.querySelector("[data-media-alt]");
+  const mediaStatus = root.querySelector("[data-media-status]");
+  const mediaAssetId = root.querySelector("[data-media-asset-id]");
+  const mediaCsrf = root.querySelector("[data-media-csrf]");
+  const mediaSessionCsrf = root.querySelector("[data-media-session-csrf]");
+  const uploadMediaButton = root.querySelector("[data-upload-media]");
+  const previewImage = root.querySelector("[data-preview-image]");
+  const previewImagePlaceholder = root.querySelector("[data-preview-image-placeholder]");
+  const previewMediaStatus = root.querySelector("[data-preview-media-status]");
   let saveTimer;
 
   function field(name) {
@@ -22,6 +35,12 @@ if (root) {
     if (!status) return;
     status.textContent = message;
     status.dataset.state = state;
+  }
+
+  function setMediaStatus(message, state = "neutral") {
+    if (!mediaStatus) return;
+    mediaStatus.textContent = message;
+    mediaStatus.dataset.state = state;
   }
 
   function createIngredientRow(value = {}) {
@@ -47,6 +66,7 @@ if (root) {
       title: field("title")?.value || "",
       summary: field("summary")?.value || "",
       description: field("description")?.value || "",
+      mediaAssetId: field("mediaAssetId")?.value || null,
       countryCode: field("countryCode")?.value || "US",
       languageCode: field("languageCode")?.value || "en",
       measurementSystem: field("measurementSystem")?.value || "metric",
@@ -76,6 +96,49 @@ if (root) {
     if (previewMeta) {
       const total = Number(draft.prepMinutes || 0) + Number(draft.cookMinutes || 0);
       previewMeta.textContent = `${draft.countryCode || "US"} · ${total} min · ${draft.servings || 1} servings · ${draft.difficulty || "easy"}`;
+    }
+  }
+
+  function renderMedia(asset) {
+    if (!asset) return;
+    if (mediaAssetId) mediaAssetId.value = asset.id;
+    if (mediaAlt && asset.altText) mediaAlt.value = asset.altText;
+    if (previewImage) {
+      previewImage.src = asset.previewUrl;
+      previewImage.alt = asset.altText || "Pending recipe image preview";
+      previewImage.hidden = false;
+    }
+    if (previewImagePlaceholder) previewImagePlaceholder.hidden = true;
+    const label = asset.moderationStatus === "approved" ? "approved" : "pending editorial review";
+    setMediaStatus(`Image uploaded · ${label}`, asset.moderationStatus === "approved" ? "success" : "neutral");
+    if (previewMediaStatus) previewMediaStatus.textContent = `Attached image is ${label}. It is not publicly served until approved.`;
+  }
+
+  function detachMedia() {
+    if (mediaAssetId) mediaAssetId.value = "";
+    if (mediaFile) mediaFile.value = "";
+    if (mediaAlt) mediaAlt.value = "";
+    if (previewImage) {
+      previewImage.removeAttribute("src");
+      previewImage.alt = "";
+      previewImage.hidden = true;
+    }
+    if (previewImagePlaceholder) previewImagePlaceholder.hidden = false;
+    setMediaStatus("No image attached.");
+    if (previewMediaStatus) previewMediaStatus.textContent = "No image attached. Previously uploaded assets remain in the contributor media library.";
+    scheduleSave();
+  }
+
+  async function restoreAttachedMedia(assetId) {
+    if (!assetId || mediaUploader?.dataset.mediaEnabled !== "true") return;
+    try {
+      const response = await fetch("/api/media/mine?limit=50", { headers: { Accept: "application/json" } });
+      if (!response.ok) return;
+      const result = await response.json();
+      const asset = result.assets?.find((item) => item.id === assetId);
+      if (asset) renderMedia(asset);
+    } catch {
+      // The text draft remains usable if private media lookup is unavailable.
     }
   }
 
@@ -122,9 +185,9 @@ if (root) {
       return;
     }
 
-    for (const name of ["title", "summary", "description", "countryCode", "languageCode", "measurementSystem", "prepMinutes", "cookMinutes", "servings", "difficulty"]) {
+    for (const name of ["title", "summary", "description", "mediaAssetId", "countryCode", "languageCode", "measurementSystem", "prepMinutes", "cookMinutes", "servings", "difficulty"]) {
       const control = field(name);
-      if (control && draft[name] !== undefined) control.value = draft[name];
+      if (control && draft[name] !== undefined && draft[name] !== null) control.value = draft[name];
     }
 
     const selectedCategories = new Set(draft.categories || []);
@@ -132,18 +195,15 @@ if (root) {
       checkbox.checked = selectedCategories.has(checkbox.value);
     }
 
-    for (const ingredient of draft.ingredients?.length ? draft.ingredients : [{}, {}]) {
-      createIngredientRow(ingredient);
-    }
-    for (const step of draft.steps?.length ? draft.steps : [{}, {}]) {
-      createStepRow(step);
-    }
+    for (const ingredient of draft.ingredients?.length ? draft.ingredients : [{}, {}]) createIngredientRow(ingredient);
+    for (const step of draft.steps?.length ? draft.steps : [{}, {}]) createStepRow(step);
 
     const savedAt = stored.savedAt ? new Date(stored.savedAt) : null;
     setStatus(savedAt && !Number.isNaN(savedAt.getTime())
       ? `Restored local draft from ${savedAt.toLocaleString()}`
       : "Restored local draft.", "success");
     updatePreview(draft);
+    restoreAttachedMedia(draft.mediaAssetId);
   }
 
   function renderErrors(errors = []) {
@@ -161,6 +221,58 @@ if (root) {
       list.append(item);
     }
     errorsPanel.append(heading, list);
+  }
+
+  async function uploadMedia() {
+    if (mediaUploader?.dataset.mediaEnabled !== "true" || !mediaFile || !mediaAlt || !uploadMediaButton) return;
+    const file = mediaFile.files?.[0];
+    const altText = mediaAlt.value.trim();
+    if (!file) return setMediaStatus("Choose an image before uploading.", "error");
+    if (!ALLOWED_MEDIA_TYPES.has(file.type)) return setMediaStatus("Only JPEG, PNG, and WebP images are accepted.", "error");
+    if (file.size < 1 || file.size > MAX_MEDIA_BYTES) return setMediaStatus("Image must be no larger than 8 MB.", "error");
+    if (altText.length < 5) return setMediaStatus("Add descriptive alternative text.", "error");
+
+    uploadMediaButton.disabled = true;
+    setMediaStatus("Authorizing private upload…");
+    try {
+      const intentResponse = await fetch("/api/media/intents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          filename: file.name,
+          mimeType: file.type,
+          byteSize: file.size,
+          purpose: "recipe_hero",
+          altText,
+          csrfToken: mediaCsrf?.value || "",
+          sessionCsrf: mediaSessionCsrf?.value || "",
+        }),
+      });
+      const intent = await intentResponse.json();
+      if (!intentResponse.ok || !intent.ok) {
+        throw new Error(intent.error || intent.errors?.join(" ") || "Upload authorization failed.");
+      }
+
+      setMediaStatus("Validating and storing image…");
+      const uploadResponse = await fetch(intent.uploadUrl, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${intent.token}`,
+          "Content-Type": file.type,
+          Accept: "application/json",
+        },
+        body: file,
+      });
+      const upload = await uploadResponse.json();
+      if (!uploadResponse.ok || !upload.ok) throw new Error(upload.error || "Image upload failed.");
+
+      renderMedia(upload.asset);
+      saveDraft();
+    } catch (error) {
+      setMediaStatus(error instanceof Error ? error.message : "Image upload failed.", "error");
+    } finally {
+      uploadMediaButton.disabled = false;
+    }
   }
 
   async function validateDraft() {
@@ -227,6 +339,8 @@ if (root) {
       if (rows.length > 1) target.closest("[data-step-row]").remove();
       scheduleSave();
     }
+    if (target.matches("[data-upload-media]")) uploadMedia();
+    if (target.matches("[data-clear-media]")) detachMedia();
     if (target.matches("[data-export-draft]")) exportDraft();
     if (target.matches("[data-clear-draft]")) {
       if (!window.confirm("Clear this local recipe draft?")) return;
