@@ -6,7 +6,7 @@ import { getMarket, isSupportedMarket } from "../../lib/market";
 
 const country = Astro.params.country?.toUpperCase();
 if (!country || !isSupportedMarket(country)) {
-  return Astro.redirect("/404", 302);
+  return Astro.rewrite("/404");
 }
 
 const market = getMarket(country);
