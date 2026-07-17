@@ -7,6 +7,7 @@ import { markets } from "../../lib/market";
 import { getMediaReadiness } from "../../lib/media";
 import { getMediaDerivativeReadiness } from "../../lib/media-derivatives";
 import { getMediaRuntimeStatus } from "../../lib/media-runtime";
+import { getRecipePublicationWorkflowReadiness } from "../../lib/recipe-publication";
 import { getRecipeSubmissionReadiness } from "../../lib/recipe-submissions";
 
 type OptionalBindings = {
@@ -25,6 +26,7 @@ export const GET: APIRoute = async () => {
   const derivatives = getMediaDerivativeReadiness();
   const mediaRuntime = getMediaRuntimeStatus();
   const recipeSubmissions = getRecipeSubmissionReadiness();
+  const publicationWorkflow = getRecipePublicationWorkflowReadiness();
 
   return Response.json(
     {
@@ -95,6 +97,13 @@ export const GET: APIRoute = async () => {
         requestedChanges: true,
         immutableSnapshots: true,
         optimisticLocking: true,
+        scheduledPublishing: publicationWorkflow.scheduledPublishing,
+        guardedScheduleProcessor: publicationWorkflow.guardedManualProcessor,
+        archiveRestore: publicationWorkflow.archiveRestore,
+        scheduledRevisionGuard: publicationWorkflow.revisionGuard,
+        scheduledMediaRevalidation: publicationWorkflow.mediaRevalidation,
+        scheduledAtomicPromotion: publicationWorkflow.atomicPromotion,
+        automaticScheduleCronConfigured: publicationWorkflow.automaticCronConfigured,
       },
       timestamp: new Date().toISOString(),
     },
