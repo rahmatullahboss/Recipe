@@ -6,7 +6,7 @@ Published-recipe revisions are implemented for the guarded D1 deployment but rem
 "RECIPE_SUBMISSIONS_ENABLED": "false"
 ```
 
-The public D1-free application is unchanged. No real change set was created, submitted, restored, reviewed, promoted, or deployed by these implementation phases.
+The public D1-free application is unchanged. No real change set was created, submitted, restored, rebased, reviewed, promoted, or deployed by these implementation phases.
 
 ## Safety objective
 
@@ -21,7 +21,7 @@ published live recipe remains public and unchanged
        → or cancelled
 ```
 
-A failed validation, stale base, concurrent update, invalid historical source, media/derivative change, or failed D1 statement leaves the live recipe unchanged.
+A failed validation, stale base, concurrent update, invalid historical source, media/derivative change, failed rebase, or failed approval statement leaves the live recipe unchanged.
 
 ## Migration `0010_published_recipe_change_sets`
 
@@ -80,6 +80,35 @@ Editors can select only eligible media already owned by the recipe contributor. 
 
 See [`EDITOR_RECIPE_CHANGE_SETS.md`](EDITOR_RECIPE_CHANGE_SETS.md).
 
+## Three-way conflict extension
+
+Migration `0012_recipe_change_set_rebases` adds immutable audited private rebases.
+
+A stale proposal is compared using:
+
+```text
+stored baseline
+actual current normalized live recipe
+private proposed recipe
+```
+
+Each scalar/media/collection unit is classified as unchanged, proposal-only, live-only, same-change, or conflict.
+
+- Proposal-only values carry forward automatically.
+- Live-only values use the current live value.
+- Equal live/proposed changes collapse safely.
+- Every true conflict requires an explicit `live` or `proposed` choice.
+- Categories are compared as a set.
+- Categories, ingredients, and directions remain atomic units.
+
+A private rebase is available only to the current controller: owner for contributor drafts/requested changes, or editor/admin for origin-backed editor drafts. Review status remains read-only; reviewer request-changes performs only a private handoff.
+
+One D1 batch updates private base revisions, baseline JSON, resolved proposal JSON/media, and change-set revision, then inserts immutable previous-baseline/current-live/previous-proposal/resulting-proposal audit snapshots. A D1 trigger requires the audit to match the resulting private row.
+
+Rebase never approves or modifies live content. Existing exact-base approval remains unchanged.
+
+See [`RECIPE_CHANGE_SET_CONFLICTS.md`](RECIPE_CHANGE_SET_CONFLICTS.md).
+
 ## Media reservation and privacy
 
 A proposed image must:
@@ -97,13 +126,15 @@ Cross-table D1 triggers prevent existing recipe code from assigning media reserv
 
 Routes:
 
-- `/admin/recipe-change-sets` — review queue and proposal launcher;
-- `/admin/recipe-change-sets/:id` — baseline/proposal comparison and audit history;
+- `/admin/recipe-change-sets` — review queue, proposal launcher, and conflict links;
+- `/admin/recipe-change-sets/:id` — stored baseline/current live/proposal review and audit history;
 - `/admin/recipes/:id/change-set` — editor current/historical private workspace;
+- `/account/change-sets/:id/conflicts` — private three-way report and controller-only rebase;
 - `POST /api/recipes/:id/editor-change-set` — editor create/restore/save/submit/cancel;
-- `POST /api/recipe-change-sets/:id/editorial` — shared request-changes/approve/cancel operations.
+- `POST /api/recipe-change-sets/:id/rebase` — guarded audited private rebase;
+- `POST /api/recipe-change-sets/:id/editorial` — shared conflict handoff/request-changes/approve/cancel operations.
 
-Editorial mutations require verified editor/admin session, same-origin, purpose/session CSRF, matching optimistic revision, and private no-store responses. The review detail compares baseline and proposed scalars, categories, ingredients, directions, media, notes, live/base revisions, origin, and audit history.
+Editorial mutations require verified editor/admin session, same-origin, purpose/session CSRF, matching optimistic revision, and private no-store responses. The review detail now distinguishes stored baseline from the actual current live recipe and blocks stale approval.
 
 ## Atomic approval and promotion
 
@@ -132,11 +163,13 @@ Every relational delete/insert requires the same token. A stale/concurrent reque
 
 ## Audit and health
 
-`recipe_change_set_events` records create, save, submit, request changes, cancel, and approve actions with actor, statuses, revisions, reason, and timestamp. `recipe_change_set_origins` records immutable editor source metadata.
+- `recipe_change_set_events` records workflow actions.
+- `recipe_change_set_origins` records immutable editor source metadata.
+- `recipe_change_set_rebases` records immutable before/live/after private rebase evidence and choices.
 
-`/api/health` reports non-secret capabilities for live-row isolation, one-active guard, private snapshots, optimistic/base guards, media reservation, approval revalidation, atomic promotion, audit events, editor-authored proposals, historical restoration, immutable origins, contributor draft-lock, media fallback, and shared approval.
+`/api/health` reports live-row isolation, one-active guard, private snapshots, optimistic/base guards, media reservation, approval revalidation, atomic promotion, workflow audit, editor proposals, historical restoration, immutable origins, contributor draft-lock, media fallback, shared approval, three-way comparison, atomic collection units, explicit choices, private-only rebase, immutable rebase audit, stale approval blocked, and reviewer handoff.
 
-The guarded authentication workflow refuses recipe-write activation if any capability is missing.
+CI enforces these capabilities. Protected activation checks currently cover through editor/historical restoration and require review before real activation for the new conflict fields.
 
 ## Acceptance matrix
 
@@ -150,20 +183,24 @@ The guarded authentication workflow refuses recipe-write activation if any capab
 8. Contributor cannot modify an editor-controlled draft.
 9. Editor cannot modify a contributor-controlled draft.
 10. Invalid proposed content/category/media creates no partial state.
-11. Stale change-set or live base revisions return conflict.
-12. Foreign/deleted/rejected/quarantined/assigned/reserved media is rejected.
-13. Historical media fallback is recorded or submission remains blocked.
-14. Save changes only private state.
-15. Submission remains absent from public output.
-16. Requested changes transfer editing control to the contributor.
-17. Approval is blocked by pending media or incomplete/stale derivatives.
-18. Successful approval keeps `published`, increments live revisions, and atomically replaces normalized content.
-19. Failed statements cannot partially replace categories/ingredients/directions.
-20. Cancellation releases active uniqueness/reservation and leaves public content unchanged.
-21. Disabling recipe submissions closes all writes while preserving rows/history/public reads.
+11. Stale normal save/approval returns conflict.
+12. Stale private proposal exposes baseline/live/proposal comparison.
+13. Every real conflict requires explicit live/proposed selection.
+14. Collections remain atomic during rebase.
+15. Foreign/deleted/rejected/quarantined/assigned/reserved media is rejected.
+16. Historical media fallback is recorded or submission remains blocked.
+17. Successful rebase changes only private state and records immutable audit.
+18. Failed rebase audit insert rolls back private update.
+19. Submission remains absent from public output.
+20. Requested changes transfer editing control to the contributor.
+21. Approval is blocked by stale base, pending media, or incomplete/stale derivatives.
+22. Successful approval keeps `published`, increments live revisions, and atomically replaces normalized content.
+23. Failed statements cannot partially replace categories/ingredients/directions.
+24. Cancellation releases active uniqueness/reservation and leaves public content unchanged.
+25. Disabling recipe submissions closes all writes while preserving rows/history/public reads.
 
-## Rollback and conflicts
+## Rollback
 
-Redeploy checked-in false flags or run guarded activation with `enable_recipe_submissions=false`. This closes create/restore/save/submit/review/approve/cancel operations without deleting stored rows, origins, or events.
+Redeploy checked-in false flags or run guarded activation with `enable_recipe_submissions=false`. This closes create/restore/save/submit/rebase/review/approve/cancel operations without deleting stored rows, origins, rebases, or events.
 
-A stale-base proposal is intentionally not auto-merged. It should be cancelled and recreated from the latest published version. Rich three-way conflict comparison/merge assistance remains a future phase and must not weaken optimistic rejection.
+Stale proposals are not auto-approved or silently overwritten. Three-way assistance only prepares a new private baseline/proposal; independent review and exact-base atomic approval remain mandatory.
