@@ -11,6 +11,7 @@ import {
   verifyTurnstile,
 } from "../../../lib/auth";
 import { recordAuthAudit } from "../../../lib/auth/audit";
+import { getAuthRuntimeStatus } from "../../../lib/auth/runtime";
 import { deliverEmailVerification } from "../../../lib/email-verification";
 
 function registerRedirect(request: Request, error: string, next: string): Response {
@@ -23,6 +24,11 @@ function registerRedirect(request: Request, error: string, next: string): Respon
 export const POST: APIRoute = async ({ request, cookies }) => {
   const form = await request.formData();
   const next = safeNextPath(form.get("next"));
+
+  if (!getAuthRuntimeStatus().ready) {
+    await recordAuthAudit(request, { eventType: "register", outcome: "blocked", metadata: { reason: "runtime_configuration" } });
+    return registerRedirect(request, "unavailable", next);
+  }
 
   if (!isSameOriginRequest(request)) {
     await recordAuthAudit(request, { eventType: "register", outcome: "blocked", metadata: { reason: "origin" } });
