@@ -13,20 +13,21 @@ if (Astro.locals.user) {
   return Astro.redirect("/account", 302);
 }
 
+const POLICY_VERSION = "2026-07-17";
 const readiness = getAuthReadiness();
 const next = safeNextPath(Astro.url.searchParams.get("next"));
 const errorCode = Astro.url.searchParams.get("error") ?? "";
 const errorMessages: Record<string, string> = {
   duplicate: "The account could not be created. Try signing in or use another email address.",
-  invalid: "Review the email, display name, and password requirements and try again.",
+  invalid: "Review the email, display name, password, and consent requirements and try again.",
   challenge: "The security challenge could not be verified. Please try again.",
   rate: "Too many registration attempts. Please wait before trying again.",
   request: "The registration request expired or was invalid. Please reload the page.",
-  unavailable: "Account registration is not available until the required Cloudflare services and secrets are configured.",
+  unavailable: "Account registration is not available until D1, KV, Turnstile, password secrets, and verification email delivery are configured.",
 };
 
 let csrfToken = "";
-if (readiness.ready) {
+if (readiness.registrationReady) {
   let nonce = Astro.cookies.get(CSRF_COOKIE)?.value;
   if (!nonce) {
     nonce = createRandomToken(18);
@@ -46,24 +47,25 @@ if (readiness.ready) {
       <div class="auth-card">
         <p class="eyebrow">Member registration</p>
         <h1 class="section-title">Create your account</h1>
-        <p class="section-copy">Passwords are protected with a unique salt, a server-only pepper, and PBKDF2-HMAC-SHA256. Publishing remains disabled until the email address is verified.</p>
+        <p class="section-copy">Passwords use a unique salt, a server-only pepper, and PBKDF2-HMAC-SHA256. A verified email is required before a session can be created.</p>
 
         {errorMessages[errorCode] && (
           <div class="auth-alert auth-alert--error" role="alert">{errorMessages[errorCode]}</div>
         )}
 
-        {!readiness.ready ? (
+        {!readiness.registrationReady ? (
           <div class="auth-alert" role="status">
             <strong>Registration is safely disabled.</strong>
-            <p>The form will open only after the following production dependencies are available:</p>
+            <p>The form opens only after these D1 production dependencies are ready:</p>
             <ul class="auth-missing">
-              {readiness.missing.map((item) => <li>{item}</li>)}
+              {readiness.registrationMissing.map((item) => <li>{item}</li>)}
             </ul>
           </div>
         ) : (
           <form class="auth-form" action="/api/auth/register" method="post">
             <input type="hidden" name="csrfToken" value={csrfToken} />
             <input type="hidden" name="next" value={next} />
+            <input type="hidden" name="policyVersion" value={POLICY_VERSION} />
 
             <div class="auth-field">
               <label for="register-name">Display name</label>
@@ -78,8 +80,13 @@ if (readiness.ready) {
             <div class="auth-field">
               <label for="register-password">Password</label>
               <input id="register-password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" aria-describedby="password-help" required />
-              <span id="password-help" class="auth-help">Use 12–128 characters and do not include the username portion of your email address.</span>
+              <span id="password-help" class="auth-help">Use 12–128 characters with uppercase, lowercase, and a number. Do not include the email username.</span>
             </div>
+
+            <label class="auth-consent" for="register-terms">
+              <input id="register-terms" name="termsAccepted" type="checkbox" required />
+              <span>I accept the <a href="/terms" target="_blank">Terms of Use</a> and <a href="/privacy" target="_blank">Privacy Notice</a>.</span>
+            </label>
 
             <div class="turnstile-wrap">
               <div class="cf-turnstile" data-sitekey={readiness.siteKey} data-action="register" data-theme="light"></div>
