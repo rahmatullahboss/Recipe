@@ -1,23 +1,94 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
+import {
+  CSRF_COOKIE,
+  createCsrfToken,
+  createRandomToken,
+  getAuthReadiness,
+  getCsrfCookieOptions,
+  safeNextPath,
+} from "../lib/auth";
+
+if (Astro.locals.user) {
+  return Astro.redirect("/account", 302);
+}
+
+const readiness = getAuthReadiness();
+const next = safeNextPath(Astro.url.searchParams.get("next"));
+const errorCode = Astro.url.searchParams.get("error") ?? "";
+const errorMessages: Record<string, string> = {
+  invalid: "The email address or password was not accepted.",
+  challenge: "The security challenge could not be verified. Please try again.",
+  rate: "Too many sign-in attempts. Please wait before trying again.",
+  request: "The sign-in request expired or was invalid. Please reload the page.",
+  unavailable: "Account sign-in is not available until the required Cloudflare services and secrets are configured.",
+};
+
+let csrfToken = "";
+if (readiness.ready) {
+  let nonce = Astro.cookies.get(CSRF_COOKIE)?.value;
+  if (!nonce) {
+    nonce = createRandomToken(18);
+    Astro.cookies.set(CSRF_COOKIE, nonce, getCsrfCookieOptions(Astro.request));
+  }
+  csrfToken = await createCsrfToken("login", nonce);
+}
 ---
 
 <BaseLayout
   title="Sign In — Ozzyl Recipes"
-  description="Sign in to save and publish recipes."
+  description="Sign in securely to your Ozzyl Recipes account."
   robots="noindex,nofollow"
 >
   <section class="section">
-    <div class="container" style="max-width:680px">
-      <div class="recipe-panel">
+    <div class="container auth-shell">
+      <div class="auth-card">
         <p class="eyebrow">Member accounts</p>
-        <h1 class="section-title">Sign in</h1>
-        <p class="section-copy">Browser-saved recipes already work without an account. Secure sessions, email verification, Turnstile validation, and cross-device collection sync will be connected in the authentication phase.</p>
-        <div class="filter-actions">
-          <a class="button" href="/saved">View saved recipes</a>
-          <a class="button button--ghost" href="/">Continue browsing</a>
-        </div>
+        <h1 class="section-title">Sign in securely</h1>
+        <p class="section-copy">Your session is stored in an HTTP-only cookie and backed by Cloudflare KV. Browser-local saves, shopping lists, and meal plans continue working without an account.</p>
+
+        {errorMessages[errorCode] && (
+          <div class="auth-alert auth-alert--error" role="alert">{errorMessages[errorCode]}</div>
+        )}
+
+        {!readiness.ready ? (
+          <div class="auth-alert" role="status">
+            <strong>Account services are safely disabled.</strong>
+            <p>Registration and sign-in will remain closed until these production dependencies are connected:</p>
+            <ul class="auth-missing">
+              {readiness.missing.map((item) => <li>{item}</li>)}
+            </ul>
+          </div>
+        ) : (
+          <form class="auth-form" action="/api/auth/login" method="post">
+            <input type="hidden" name="csrfToken" value={csrfToken} />
+            <input type="hidden" name="next" value={next} />
+
+            <div class="auth-field">
+              <label for="login-email">Email address</label>
+              <input id="login-email" name="email" type="email" autocomplete="email" inputmode="email" maxlength="254" required />
+            </div>
+
+            <div class="auth-field">
+              <label for="login-password">Password</label>
+              <input id="login-password" name="password" type="password" autocomplete="current-password" minlength="12" maxlength="128" required />
+            </div>
+
+            <div class="turnstile-wrap">
+              <div class="cf-turnstile" data-sitekey={readiness.siteKey} data-action="login" data-theme="light"></div>
+            </div>
+
+            <div class="auth-actions">
+              <button class="button" type="submit">Sign in</button>
+              <a class="button button--ghost" href={`/register?next=${encodeURIComponent(next)}`}>Create account</a>
+            </div>
+          </form>
+        )}
+
+        <p class="auth-meta">Public error messages are intentionally generic to prevent account discovery. Ten failed attempts temporarily lock further password checks.</p>
       </div>
     </div>
   </section>
+
+  <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </BaseLayout>
