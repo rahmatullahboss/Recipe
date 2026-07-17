@@ -31,17 +31,18 @@
   color: var(--muted);
 }
 
-.submission-list {
+.submission-list,
+.submission-cards {
   display: grid;
   gap: 18px;
-  margin: 0;
+  margin: 0 0 24px;
   padding: 0;
   list-style: none;
 }
 
 .submission-card {
   display: grid;
-  gap: 14px;
+  gap: 16px;
   padding: 24px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -52,6 +53,19 @@
 .submission-card h2,
 .submission-card p {
   margin: 0;
+}
+
+.submission-card__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.submission-card__heading h2 {
+  margin-top: 4px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.3rem, 2vw, 1.8rem);
 }
 
 .submission-card__meta {
@@ -68,5 +82,9 @@
 @media (max-width: 560px) {
   .submission-card {
     padding: 20px;
+  }
+
+  .submission-card__heading {
+    flex-direction: column;
   }
 }
