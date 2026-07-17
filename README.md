@@ -250,6 +250,10 @@ No secret value is committed. Wrangler uploads the runner-only secret file durin
 - `docs/MEDIA_PIPELINE.md` — upload validation, moderation, delivery rules, activation order, testing, and current boundaries
 - `docs/IMPLEMENTATION_STATUS.md` — completed and remaining scope
 
+## Current activation state
+
+No D1 database, account flag, registration flag, media-upload flag, administrator account, contributor upload, moderation decision, production deployment, or repository merge was changed by this branch work.
+
 ## Remaining production phases
 
 1. Configure a non-production Cloudflare environment and run the guarded D1/account/media test matrices.
