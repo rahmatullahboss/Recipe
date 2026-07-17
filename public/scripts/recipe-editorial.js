@@ -17,9 +17,18 @@ if (root) {
       setResult("Add a clear reason before archiving.", "error");
       return;
     }
+    if (action === "request_changes" && note.length < 10) {
+      setResult("Describe the required contributor changes with at least 10 characters.", "error");
+      return;
+    }
 
     buttons.forEach((button) => { button.disabled = true; });
-    setResult(action === "publish" ? "Publishing recipe…" : "Archiving submission…");
+    const progress = action === "publish"
+      ? "Publishing recipe…"
+      : action === "request_changes"
+        ? "Returning recipe to the contributor…"
+        : "Archiving submission…";
+    setResult(progress);
     try {
       const response = await fetch(`/api/recipes/${root.dataset.recipeId}/editorial`, {
         method: "POST",
@@ -34,7 +43,12 @@ if (root) {
       });
       const payload = await response.json();
       if (!response.ok || !payload.ok) throw new Error(payload.error || "Editorial decision failed.");
-      setResult(action === "publish" ? "Recipe published." : "Submission archived.", "success");
+      const message = action === "publish"
+        ? "Recipe published."
+        : action === "request_changes"
+          ? "Changes requested from the contributor."
+          : "Submission archived.";
+      setResult(message, "success");
       window.setTimeout(() => window.location.assign("/admin/recipes"), 700);
     } catch (error) {
       setResult(error instanceof Error ? error.message : "Editorial decision failed.", "error");
