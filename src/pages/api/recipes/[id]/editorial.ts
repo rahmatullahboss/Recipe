@@ -6,6 +6,7 @@ import {
   transitionRecipeEditorialStatus,
   type EditorialAction,
 } from "../../../../lib/recipe-submissions";
+import { requestRecipeChanges } from "../../../../lib/recipe-revisions";
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
@@ -37,7 +38,7 @@ export const POST: APIRoute = async ({ request, cookies, locals, params }) => {
   }
 
   const action = input.action;
-  if (action !== "publish" && action !== "archive") {
+  if (action !== "publish" && action !== "archive" && action !== "request_changes") {
     return json({ ok: false, error: "Select a valid editorial action." }, 422);
   }
   const expectedRevision = Number(input.expectedRevision);
@@ -48,13 +49,21 @@ export const POST: APIRoute = async ({ request, cookies, locals, params }) => {
   if (!/^recipe_[0-9a-f-]{36}$/i.test(recipeId)) return json({ ok: false, error: "Recipe identifier is invalid." }, 400);
 
   try {
-    const result = await transitionRecipeEditorialStatus({
-      recipeId,
-      actorId: locals.user.id,
-      expectedRevision,
-      action: action as EditorialAction,
-      reason: typeof input.reason === "string" ? input.reason : undefined,
-    });
+    const reason = typeof input.reason === "string" ? input.reason : undefined;
+    const result = action === "request_changes"
+      ? await requestRecipeChanges({
+        recipeId,
+        actorId: locals.user.id,
+        expectedRevision,
+        reason,
+      })
+      : await transitionRecipeEditorialStatus({
+        recipeId,
+        actorId: locals.user.id,
+        expectedRevision,
+        action: action as EditorialAction,
+        reason,
+      });
     return json({ ok: true, result });
   } catch (error) {
     if (error instanceof RecipeSubmissionError) {
