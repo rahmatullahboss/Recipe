@@ -1,6 +1,6 @@
 # D1 Authentication Activation
 
-The account system is implemented for the future D1 deployment, but both authentication flags remain disabled by default. The current D1-free production path is unchanged.
+The account system is implemented for the future D1 deployment, but sign-in and registration remain disabled by default. The current D1-free production path is unchanged.
 
 ## Architecture
 
@@ -9,7 +9,7 @@ The account system is implemented for the future D1 deployment, but both authent
 | User identities, password hashes, account status | Cloudflare D1 |
 | Email verification and reset token digests | Cloudflare D1 |
 | Consent history and authentication audit events | Cloudflare D1 |
-| Login sessions, CSRF/rate-limit state | Workers KV |
+| Login sessions, CSRF and rate-limit state | Workers KV |
 | Bot challenge | Cloudflare Turnstile |
 | Verification email delivery | Authenticated HTTPS webhook |
 | Password hashing | PBKDF2-HMAC-SHA256, 600,000 iterations, unique salt, server-only pepper |
@@ -37,63 +37,63 @@ Root-level SQL files are retained as legacy development references and are not p
 
 ## Production activation order
 
-Do not enable account flags before the schema, KV, Turnstile, email webhook, and secrets are verified.
+Do not enable account flags before the schema, KV, Turnstile, peppers, and optional registration email delivery are verified.
 
 ### 1. Provision and migrate D1
 
-Run the guarded **Enable D1 and Deploy** workflow with the exact confirmation value:
+Run **Enable D1 and Deploy** with the exact confirmation value:
 
 ```text
 ENABLE_D1
 ```
 
-After it completes, `/api/health` must report `dataMode: "d1"` and the D1/KV bindings as available. Authentication should still report `enabled: false`.
+After completion, `/api/health` must report D1 mode and available D1/KV bindings. Authentication should still report `enabled: false`.
 
-### 2. Configure Turnstile
+### 2. Configure the GitHub `production` environment
 
-Create a Turnstile widget for the final production hostname. Store the public site key as a Worker variable and the secret key as a Worker secret.
+The guarded **Enable Authentication** workflow reads deployment credentials plus authentication configuration from the `production` environment.
 
-Future `wrangler.d1.jsonc` variables:
+Required environment secrets for sign-in:
 
-```jsonc
-"TURNSTILE_SITE_KEY": "<public-site-key>"
+```text
+CLOUDFLARE_ACCOUNT_ID
+CLOUDFLARE_API_TOKEN
+AUTH_PASSWORD_PEPPER
+AUTH_FINGERPRINT_PEPPER
+TURNSTILE_SECRET_KEY
 ```
 
-Secret command:
+Required environment variable for sign-in:
 
-```bash
-npx wrangler secret put TURNSTILE_SECRET_KEY --config wrangler.d1.jsonc
+```text
+TURNSTILE_SITE_KEY
 ```
 
-Turnstile tokens are verified server-side with Cloudflare Siteverify. The expected action and production hostname are checked. Tokens are not accepted based only on the browser widget.
+Public registration additionally requires:
 
-### 3. Configure password and audit peppers
-
-Generate two independent high-entropy values. Do not reuse the API token, session token, or database identifiers.
-
-```bash
-npx wrangler secret put AUTH_PASSWORD_PEPPER --config wrangler.d1.jsonc
-npx wrangler secret put AUTH_FINGERPRINT_PEPPER --config wrangler.d1.jsonc
+```text
+AUTH_EMAIL_WEBHOOK_TOKEN        # environment secret
+AUTH_EMAIL_WEBHOOK_URL          # environment variable
+AUTH_FROM_EMAIL                 # optional environment variable
 ```
 
-Changing `AUTH_PASSWORD_PEPPER` invalidates existing password hashes. Keep it in a managed secret store with a documented recovery process. `AUTH_FINGERPRINT_PEPPER` may be rotated, but audit fingerprints created before and after rotation will no longer correlate.
+Generate independent high-entropy values for the password and fingerprint peppers. Do not reuse deployment credentials, database identifiers, or session values.
+
+Changing `AUTH_PASSWORD_PEPPER` invalidates existing password hashes. Keep it in a managed secret store with a documented recovery process. Rotating `AUTH_FINGERPRINT_PEPPER` breaks correlation with older audit fingerprints but does not invalidate passwords or sessions.
+
+### 3. Configure Turnstile
+
+Create a Turnstile widget for the final production hostname and any intentional staging hostname.
+
+- Store the public site key as `TURNSTILE_SITE_KEY`.
+- Store the secret key as `TURNSTILE_SECRET_KEY`.
+- Restrict the widget to approved hostnames.
+
+The Worker always calls Cloudflare Siteverify and checks the expected action and hostname. A browser widget result is never trusted by itself.
 
 ### 4. Configure verification email delivery
 
-The Worker sends an authenticated JSON request to an HTTPS webhook. Store the endpoint and bearer token as Worker secrets:
-
-```bash
-npx wrangler secret put AUTH_EMAIL_WEBHOOK_URL --config wrangler.d1.jsonc
-npx wrangler secret put AUTH_EMAIL_WEBHOOK_TOKEN --config wrangler.d1.jsonc
-```
-
-Add the sender as a non-secret variable after the sending domain is verified:
-
-```jsonc
-"AUTH_FROM_EMAIL": "accounts@example.com"
-```
-
-Webhook request format:
+When registration is enabled, the Worker sends an authenticated JSON request to the configured HTTPS webhook. The request contains:
 
 ```json
 {
@@ -106,96 +106,86 @@ Webhook request format:
 }
 ```
 
-Required request headers:
+The adapter must authenticate the request using the configured webhook token, return 2xx only after accepting the message for delivery, and avoid logging the complete verification link.
+
+Verification tokens are single-use, expire after 30 minutes, and are stored only as SHA-256 digests in D1. A failed delivery invalidates the token and removes the newly created pending registration.
+
+### 5. Enable sign-in with registration closed
+
+Open **Actions → Enable Authentication** and enter exactly:
 
 ```text
-Authorization: Bearer <AUTH_EMAIL_WEBHOOK_TOKEN>
-Content-Type: application/json
+ENABLE_AUTH
 ```
 
-The webhook must return a successful 2xx response only after accepting the message for delivery. A failed response invalidates the D1 token and rolls back a newly created pending registration.
+Keep `enable_registration` set to false.
 
-Verification tokens are single-use, expire after 30 minutes, and are stored only as SHA-256 digests in D1.
+The workflow:
 
-### 5. Enable sign-in only
+1. Verifies required values without printing their contents.
+2. Validates the project and builds the D1 Worker.
+3. Deploys the checked-in D1 configuration with auth disabled.
+4. Applies pending migrations.
+5. Generates runner-only config and secret input files.
+6. Deploys with `AUTH_ENABLED=true` and `AUTH_REGISTRATION_ENABLED=false`.
+7. Verifies authentication readiness through `/api/health`.
+8. Removes temporary files even after failure.
 
-After D1, KV, Turnstile, and peppers are verified, change:
+This allows verified active accounts to sign in while public registration remains closed. The seeded editorial record has no usable password; operational accounts still require a controlled provisioning process.
 
-```jsonc
-"AUTH_ENABLED": "true",
-"AUTH_REGISTRATION_ENABLED": "false"
-```
+### 6. Enable public registration last
 
-Deploy the D1 configuration. This allows verified active accounts to sign in but keeps public registration closed.
+Before opening registration:
 
-A seeded editorial record has no usable password by default. Provision operational admin/editor credentials through a controlled one-time administration process before relying on sign-in.
-
-### 6. Enable registration last
-
-Before public registration:
-
-1. Have the Terms of Use and Privacy Notice approved for the operating business and jurisdiction.
-2. Verify the email webhook and sender domain.
+1. Approve the Terms of Use and Privacy Notice for the operating business and jurisdictions.
+2. Verify the email adapter and sender domain.
 3. Confirm Turnstile hostname restrictions.
-4. Confirm `/api/health` reports `registrationReady: true` after the flag is enabled.
-5. Test registration, email verification, login, five-attempt lockout, logout, and session revocation in a non-production environment.
+4. Test registration, email delivery, verification, login, lockout, logout, and session revocation outside production.
+5. Confirm the webhook token and URL are present in the GitHub `production` environment.
 
-Then change:
-
-```jsonc
-"AUTH_REGISTRATION_ENABLED": "true"
-```
-
-and deploy the D1 configuration.
-
-## Required bindings and values
-
-Core sign-in requires:
-
-```text
-DB
-SESSION
-AUTH_ENABLED=true
-AUTH_PASSWORD_PEPPER
-AUTH_FINGERPRINT_PEPPER
-TURNSTILE_SITE_KEY
-TURNSTILE_SECRET_KEY
-```
-
-Registration additionally requires:
-
-```text
-AUTH_REGISTRATION_ENABLED=true
-AUTH_EMAIL_WEBHOOK_URL
-AUTH_EMAIL_WEBHOOK_TOKEN
-```
-
-Optional:
-
-```text
-AUTH_FROM_EMAIL
-```
+Run **Enable Authentication** again with `enable_registration` set to true. The workflow refuses to proceed if registration-specific delivery configuration is missing and verifies `registrationReady: true` after deployment.
 
 ## Security behavior
 
-- Production session cookie uses the `__Host-` prefix, HTTP-only, Secure, SameSite, and path `/`.
+- Production sessions use an HTTP-only, Secure, SameSite cookie with the `__Host-` prefix.
 - CSRF tokens are purpose-bound, signed, and time-limited.
 - Login and registration have KV-backed rate limits.
-- Five failed password checks lock an account for 15 minutes.
+- Five failed password checks lock an active account for 15 minutes.
 - Public login errors remain generic to reduce account enumeration.
 - Only verified `active` accounts can create or restore sessions.
-- Audit records use peppered IP and user-agent fingerprints rather than raw values.
-- Password, verification, and session secrets are never committed to the repository.
+- Audit records store separate peppered IP and user-agent fingerprints rather than raw values.
+- Registration, login, email verification, and logout outcomes are audited.
+- Password, verification, session, email, and deployment secrets are never committed.
+- Registration records the accepted terms and privacy document version.
+
+## Health checks
+
+After sign-in activation, `/api/health` must report:
+
+```json
+{
+  "dataMode": "d1",
+  "authentication": {
+    "enabled": true,
+    "ready": true,
+    "registrationEnabled": false
+  }
+}
+```
+
+When registration is enabled, `registrationEnabled` and `registrationReady` must both be true.
+
+Health output exposes only readiness booleans and counts; it never returns secret values.
 
 ## Rollback
 
-To stop account access without affecting public recipes:
+To disable account access without deleting D1 data or Cloudflare secrets, run **Enable D1 and Deploy** again. The checked-in D1 configuration redeploys:
 
 ```jsonc
 "AUTH_ENABLED": "false",
 "AUTH_REGISTRATION_ENABLED": "false"
 ```
 
-Redeploy `wrangler.d1.jsonc`. Existing KV session records remain unusable because middleware refuses to load authentication context while the feature flag is disabled.
+Existing KV session records become unusable because middleware refuses to restore authentication context while the feature is disabled.
 
-To revoke all sessions for one account, increment that user's `auth_version` in D1 through a controlled administrative action. The next request invalidates every KV session carrying the previous version.
+To revoke every session for one account, increment that user's `auth_version` through a controlled administrative action. The next request invalidates KV sessions carrying the previous version.
