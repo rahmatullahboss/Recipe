@@ -40,6 +40,7 @@ async function validateMigrations() {
     "0008_media_derivatives",
     "0009_recipe_publication_workflow",
     "0010_published_recipe_change_sets",
+    "0011_editor_change_set_origins",
   ];
   const actual = (await readdir(directory, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory())
@@ -109,6 +110,19 @@ async function validateMigrations() {
   ]) {
     assert(sql.get("0010_published_recipe_change_sets")?.includes(token), `Published recipe change-set migration is missing ${token}.`);
   }
+  for (const token of [
+    "recipe_change_set_origins",
+    "editor_current",
+    "revision_snapshot",
+    "approved_change_set_proposed",
+    "approved_change_set_baseline",
+    "media_fallback_applied",
+    "recipe_change_set_origins_immutable",
+    "recipe_change_set_origins_require_editor_creator",
+    "recipe_change_set_origins_match_change_set_creator",
+  ]) {
+    assert(sql.get("0011_editor_change_set_origins")?.includes(token), `Editor change-set origin migration is missing ${token}.`);
+  }
 
   const wrangler = await readFile(path.join(root, "wrangler.d1.jsonc"), "utf8");
   assert(wrangler.includes('"migrations_pattern": "migrations/d1/*/migration.sql"'), "Wrangler migration pattern changed.");
@@ -133,6 +147,12 @@ async function validateMigrations() {
     "published change-set base revision guard is not available",
     "published change-set media reservation is not available",
     "published change-set atomic promotion is not available",
+    "editor-authored published change sets are not available",
+    "historical recipe snapshot restore is not available",
+    "editor change-set origin audit is not available",
+    "editor change-set contributor draft lock is not available",
+    "historical snapshot media fallback is not available",
+    "editor change-set shared atomic approval is not available",
   ]) {
     assert(activation.includes(token), `Guarded activation capability check is missing: ${token}.`);
   }
@@ -258,6 +278,28 @@ async function validateSecurityFoundations() {
     assert(changeSets.includes(token), `Published recipe change-set invariant is missing: ${token}.`);
   }
 
+  const editorChangeSets = await readFile(path.join(root, "src", "lib", "editor-recipe-change-sets.ts"), "utf8");
+  for (const token of [
+    "startEditorPublishedRecipeChangeSet",
+    "saveEditorPublishedRecipeChangeSet",
+    "cancelEditorPublishedRecipeChangeSet",
+    "resolveHistoricalSource",
+    "recipe_revision_snapshots",
+    "approved-proposed:",
+    "approved-baseline:",
+    "recipe_change_set_origins",
+    "mediaFallbackApplied",
+    "base_recipe_revision",
+    "base_content_revision",
+    "status = 'published'",
+    "MEDIA_DERIVATIVE_POLICY_VERSION",
+    "getEditorRecipeChangeSetReadiness",
+    "contributorDraftLock: true",
+    "sharedAtomicApproval: true",
+  ]) {
+    assert(editorChangeSets.includes(token), `Editor-authored recipe change-set invariant is missing: ${token}.`);
+  }
+
   const submitRoute = await readFile(path.join(root, "src", "pages", "api", "recipes", "submissions.ts"), "utf8");
   assert(submitRoute.includes('validateCsrfToken("recipe-submit"'), "Recipe submission CSRF check is missing.");
   assert(submitRoute.includes("consumeRateLimit"), "Recipe submission rate limit is missing.");
@@ -286,9 +328,34 @@ async function validateSecurityFoundations() {
   assert(contributorChangeSetRoute.includes('validateCsrfToken("recipe-published-change-set"'), "Published change-set contributor CSRF check is missing.");
   assert(contributorChangeSetRoute.includes("consumeRateLimit"), "Published change-set contributor rate limit is missing.");
   assert(contributorChangeSetRoute.includes("validateRecipeDraft"), "Published change-set canonical validation is missing.");
+  assert(contributorChangeSetRoute.includes("isEditorControlledPublishedChangeSetDraft"), "Contributor route must refuse editor-controlled private drafts.");
   for (const token of ["create", "save", "submit", "cancel", "expectedRevision"]) {
     assert(contributorChangeSetRoute.includes(token), `Published change-set contributor route is missing: ${token}.`);
   }
+
+  const editorChangeSetRoute = await readFile(path.join(root, "src", "pages", "api", "recipes", "[id]", "editor-change-set.ts"), "utf8");
+  assert(editorChangeSetRoute.includes('validateCsrfToken("recipe-editor-authored-change-set"'), "Editor-authored change-set CSRF check is missing.");
+  assert(editorChangeSetRoute.includes('locals.user.role !== "editor"'), "Editor-authored change-set role check is missing.");
+  assert(editorChangeSetRoute.includes("consumeRateLimit"), "Editor-authored change-set rate limit is missing.");
+  assert(editorChangeSetRoute.includes("validateRecipeDraft"), "Editor-authored change-set canonical validation is missing.");
+  assert(editorChangeSetRoute.includes('"Cache-Control": "private, no-store"'), "Editor-authored change-set responses must remain private and no-store.");
+  for (const token of ["restore_snapshot", "save", "submit", "cancel", "expectedRevision"]) {
+    assert(editorChangeSetRoute.includes(token), `Editor-authored change-set route is missing: ${token}.`);
+  }
+
+  const editorChangeSetPage = await readFile(path.join(root, "src", "pages", "admin", "recipes", "[id]", "change-set.astro"), "utf8");
+  for (const token of [
+    "getEditorPublishedRecipeChangeSetWorkspace",
+    "data-restore-source",
+    "data-editor-authored-change-set",
+    "Uploading on the contributor's behalf is intentionally unavailable",
+    "Submit for review",
+  ]) {
+    assert(editorChangeSetPage.includes(token), `Editor-authored change-set page invariant is missing: ${token}.`);
+  }
+
+  const middleware = await readFile(path.join(root, "src", "middleware.ts"), "utf8");
+  assert(middleware.includes("editor-change-set"), "Editor-authored change-set API must be marked private and no-store.");
 
   const changeSetEditorialRoute = await readFile(path.join(root, "src", "pages", "api", "recipe-change-sets", "[id]", "editorial.ts"), "utf8");
   assert(changeSetEditorialRoute.includes('validateCsrfToken("recipe-change-set-editorial"'), "Published change-set editorial CSRF check is missing.");
@@ -335,6 +402,13 @@ async function validateSecurityFoundations() {
     "publishedChangeSetMediaReservation",
     "publishedChangeSetAtomicPromotion",
     "publishedChangeSetAuditEvents",
+    "editorAuthoredPublishedChangeSets",
+    "historicalSnapshotRestore",
+    "editorChangeSetOriginAudit",
+    "editorChangeSetContributorDraftLock",
+    "editorChangeSetCurrentLiveBaseline",
+    "historicalSnapshotMediaFallback",
+    "editorChangeSetSharedAtomicApproval",
   ]) {
     assert(health.includes(token), `Health capability is missing: ${token}.`);
   }
@@ -362,4 +436,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, ten D1 migrations, guarded authentication, privacy-safe media derivatives, scheduled publication, archive restoration, private published recipe change sets, recipe editorial and contributor revision invariants, and browser scripts.`);
+console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, eleven D1 migrations, guarded authentication, privacy-safe media derivatives, scheduled publication, archive restoration, contributor and editor-authored private published recipe change sets, historical snapshot restoration, recipe editorial and contributor revision invariants, and browser scripts.`);
