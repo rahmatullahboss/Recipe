@@ -2,7 +2,11 @@
 import BaseLayout from "../../layouts/BaseLayout.astro";
 ---
 
-<BaseLayout title="Add a Recipe — Ozzyl Recipes" description="Publish a regional recipe for the international Ozzyl Recipes community.">
+<BaseLayout
+  title="Add a Recipe — Ozzyl Recipes"
+  description="Publish a regional recipe for the international Ozzyl Recipes community."
+  robots="noindex,nofollow"
+>
   <section class="section">
     <div class="container" style="max-width:760px">
       <div class="recipe-panel">
@@ -10,8 +14,9 @@ import BaseLayout from "../../layouts/BaseLayout.astro";
         <h1 class="section-title">Add a regional recipe</h1>
         <p class="section-copy">The publishing route is ready for the next phase: authenticated drafts, country and language selection, US or metric measurements, ingredient and direction editors, nutrition fields, moderation, Turnstile, and signed R2 image uploads.</p>
         <p class="section-copy">Every published recipe will retain its country and cuisine identity while remaining discoverable across the global catalogue.</p>
-        <div style="margin-top:28px">
-          <a class="button" href="/search">Explore published recipes</a>
+        <div class="filter-actions">
+          <a class="button" href="/categories">Review the taxonomy</a>
+          <a class="button button--ghost" href="/search">Explore published recipes</a>
         </div>
       </div>
     </div>
