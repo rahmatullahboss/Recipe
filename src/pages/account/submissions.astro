@@ -11,11 +11,23 @@ const submissions = readiness.database ? await listContributorSubmissions(Astro.
 ---
 
 <BaseLayout title="Your Recipe Submissions — Ozzyl Recipes" robots="noindex,nofollow">
-  <section class="section">
+  <section class="section section--soft">
     <div class="container">
       <p class="eyebrow">Contributor workspace</p>
       <h1 class="section-title">Your recipe submissions</h1>
-      <p>{submissions.length} submission{submissions.length === 1 ? "" : "s"}</p>
+      <p class="section-copy">Recipes remain private while they are under review.</p>
+    </div>
+  </section>
+  <section class="section">
+    <div class="container">
+      {!readiness.database && <p>D1 submission storage is unavailable.</p>}
+      {readiness.database && submissions.length === 0 && <p>No recipe submissions yet.</p>}
+      {submissions.length > 0 && (
+        <ul class="submission-list">
+          {submissions.map((item: any) => <li><strong>{item.title}</strong> — {item.status} — revision {item.revision}</li>)}
+        </ul>
+      )}
+      <p><a class="button" href="/recipes/new">Open recipe editor</a></p>
     </div>
   </section>
 </BaseLayout>
