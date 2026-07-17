@@ -9,15 +9,18 @@ import {
 import { listCategories } from "../../lib/db";
 import { markets, resolveMarket } from "../../lib/market";
 import { getMediaReadiness } from "../../lib/media";
+import { getMediaRuntimeStatus } from "../../lib/media-runtime";
 import { supportedRecipeLanguages } from "../../lib/recipe-draft";
 
 const market = resolveMarket(Astro.request, Astro.url);
 const categories = await listCategories(100);
 const mediaReadiness = getMediaReadiness();
+const mediaRuntime = getMediaRuntimeStatus();
 const canUploadMedia = Boolean(
   Astro.locals.authReady
   && Astro.locals.user
   && Astro.locals.session
+  && mediaRuntime.uploadsEnabled
   && mediaReadiness.ready,
 );
 let mediaCsrfToken = "";
@@ -48,7 +51,7 @@ const languageLabels: Record<string, string> = {
     <div class="container">
       <p class="eyebrow">Contributor workspace</p>
       <h1 class="section-title">Create a regional recipe draft</h1>
-      <p class="section-copy">Recipe text autosaves in this browser. Verified contributors can upload one JPEG, PNG, or WebP image to private R2 storage; it remains private until editorial approval.</p>
+      <p class="section-copy">Recipe text autosaves in this browser. When the guarded media feature is activated, verified contributors can upload one JPEG, PNG, or WebP image to private R2 storage; it remains private until editorial approval.</p>
     </div>
   </section>
 
@@ -117,9 +120,9 @@ const languageLabels: Record<string, string> = {
           ) : (
             <div class="validation-errors media-upload-disabled" role="status">
               {Astro.locals.user ? (
-                <p>Media uploads remain safely disabled until D1, R2, authentication, and the media migration are active.</p>
+                <p>Media uploads remain safely disabled until authentication, D1, R2, the media migration, and the explicit <code>MEDIA_UPLOADS_ENABLED</code> activation flag are ready.</p>
               ) : (
-                <p><a href="/login?next=%2Frecipes%2Fnew">Sign in with a verified account</a> to upload a private image for editorial review. The text draft still works without an account.</p>
+                <p><a href="/login?next=%2Frecipes%2Fnew">Sign in with a verified account</a> after contributor media is activated. The text draft still works without an account.</p>
               )}
             </div>
           )}
