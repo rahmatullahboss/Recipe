@@ -39,6 +39,9 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Validate catalogue and D1 migrations
+        run: npm run validate
+
       - name: Build D1-free production Worker
         run: npm run build
 
@@ -56,6 +59,21 @@ jobs:
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment-url }}
         run: |
           test -n "$DEPLOYMENT_URL" || { echo "Wrangler did not return a deployment URL"; exit 1; }
-          curl --fail --silent --show-error --retry 5 --retry-delay 3 "$DEPLOYMENT_URL/api/health"
-          echo
+          HEALTH_JSON=$(curl --fail --silent --show-error --retry 5 --retry-delay 3 "$DEPLOYMENT_URL/api/health")
+          echo "$HEALTH_JSON"
+          HEALTH_JSON="$HEALTH_JSON" node --input-type=module -e '
+            const health = JSON.parse(process.env.HEALTH_JSON ?? "{}");
+            const failures = [];
+            if (health.ok !== true) failures.push("health.ok is not true");
+            if (health.dataMode !== "static-fallback") failures.push(`unexpected dataMode: ${health.dataMode}`);
+            if (health.catalogue?.supportedMarkets !== 10) failures.push("supported market count is not 10");
+            if (health.bindings?.d1 !== false) failures.push("D1 should not be bound in the default deployment");
+            if (health.bindings?.kv !== true) failures.push("KV binding is unavailable");
+            if (health.bindings?.r2 !== true) failures.push("R2 binding is unavailable");
+            if (health.bindings?.images !== true) failures.push("Images binding is unavailable");
+            if (failures.length) {
+              console.error(failures.join("\n"));
+              process.exit(1);
+            }
+          '
           echo "Deployed and verified: $DEPLOYMENT_URL"
