@@ -32,12 +32,15 @@ const privatePaths = new Set([
   "/api/auth/logout",
   "/api/auth/verify-email",
   "/api/recipes/validate",
+  "/api/recipes/submissions",
 ]);
 
 function isPrivatePath(pathname: string): boolean {
   return privatePaths.has(pathname)
+    || pathname.startsWith("/account/")
     || pathname.startsWith("/api/media/")
     || pathname.startsWith("/admin/")
+    || /^\/api\/recipes\/[^/]+\/editorial\/?$/.test(pathname)
     || /^\/recipes\/[^/]+\/cook\/?$/.test(pathname);
 }
 
