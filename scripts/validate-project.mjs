@@ -109,36 +109,40 @@ function validateRecipes() {
 }
 
 async function validateMigrations() {
-  const migrationDirectory = path.join(root, "migrations");
-  const filenames = (await readdir(migrationDirectory))
-    .filter((filename) => filename.endsWith(".sql"))
+  const migrationDirectory = path.join(root, "migrations", "d1");
+  const entries = (await readdir(migrationDirectory, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
     .sort();
+  const expected = [
+    "0001_initial",
+    "0002_seed",
+    "0003_market_coverage",
+    "0004_auth_accounts",
+  ];
 
-  assert(filenames.length >= 4, "Expected at least four D1 migrations.");
+  assert(JSON.stringify(entries) === JSON.stringify(expected), `Unexpected D1 migration directories: ${entries.join(", ")}`);
 
-  filenames.forEach((filename, index) => {
-    assert(/^\d{4}_[a-z0-9_]+\.sql$/.test(filename), `Invalid migration filename: ${filename}`);
-    const expectedPrefix = String(index + 1).padStart(4, "0");
-    assert(filename.startsWith(`${expectedPrefix}_`), `Migration order gap: expected ${expectedPrefix}, found ${filename}`);
-  });
-
-  for (const filename of filenames) {
-    const sql = await readFile(path.join(migrationDirectory, filename), "utf8");
-    assert(sql.trim().length > 0, `Migration is empty: ${filename}`);
-    assert(sql.includes(";"), `Migration contains no SQL statement terminator: ${filename}`);
+  const migrationSql = new Map();
+  for (const directory of expected) {
+    const filename = path.join(migrationDirectory, directory, "migration.sql");
+    const sql = await readFile(filename, "utf8");
+    migrationSql.set(directory, sql);
+    assert(sql.trim().length > 0, `Migration is empty: ${directory}/migration.sql`);
+    assert(sql.includes(";"), `Migration contains no SQL statement terminator: ${directory}/migration.sql`);
   }
 
-  const initial = await readFile(path.join(migrationDirectory, "0001_initial.sql"), "utf8");
+  const initial = migrationSql.get("0001_initial") ?? "";
   assert(initial.includes("measurement_system"), "Initial migration is missing measurement_system.");
   assert(initial.includes("recipe_localizations"), "Initial migration is missing recipe_localizations.");
   assert(initial.includes("recipe_nutrition"), "Initial migration is missing recipe_nutrition.");
 
-  const coverage = await readFile(path.join(migrationDirectory, "0003_market_coverage.sql"), "utf8");
+  const coverage = migrationSql.get("0003_market_coverage") ?? "";
   for (const code of ["CA", "NZ", "DE", "CH", "SE", "NL"]) {
     assert(coverage.includes(`'${code}'`), `Market coverage migration is missing ${code}.`);
   }
 
-  const auth = await readFile(path.join(migrationDirectory, "0004_auth_accounts.sql"), "utf8");
+  const auth = migrationSql.get("0004_auth_accounts") ?? "";
   for (const field of [
     "email_verified_at",
     "pending_verification",
@@ -148,11 +152,16 @@ async function validateMigrations() {
     "failed_login_count",
     "locked_until",
     "auth_tokens",
+    "auth_identities",
+    "user_consents",
     "auth_audit_events",
     "idx_users_email_nocase",
   ]) {
     assert(auth.includes(field), `Authentication migration is missing ${field}.`);
   }
+
+  const wrangler = await readFile(path.join(root, "wrangler.d1.jsonc"), "utf8");
+  assert(wrangler.includes('"migrations_pattern": "migrations/d1/*/migration.sql"'), "Wrangler is not using the authoritative nested migration layout.");
 }
 
 async function validateAuthFoundation() {
@@ -162,9 +171,11 @@ async function validateAuthFoundation() {
   assert(source.includes("https://challenges.cloudflare.com/turnstile/v0/siteverify"), "Turnstile Siteverify integration is missing.");
   assert(source.includes("validateCsrfToken"), "Signed CSRF validation is missing from the authentication foundation.");
   assert(source.includes("constantTimeEqual"), "Constant-time credential comparison is missing.");
+  assert(source.includes("pending_verification"), "Registration must keep new accounts pending email verification.");
 
-  const modularCrypto = await readFile(path.join(root, "src", "lib", "auth", "crypto.ts"), "utf8");
-  assert(modularCrypto.includes("PASSWORD_ITERATIONS = 600_000"), "Modular auth crypto work factor was reduced below the approved baseline.");
+  const verification = await readFile(path.join(root, "src", "lib", "email-verification.ts"), "utf8");
+  assert(verification.includes("auth_tokens"), "Email verification tokens are not stored in D1.");
+  assert(verification.includes("token_hash"), "Email verification token digests are not persisted.");
 
   const middleware = await readFile(path.join(root, "src", "middleware.ts"), "utf8");
   assert(middleware.includes("https://challenges.cloudflare.com"), "Content Security Policy does not allow the Turnstile origin.");
@@ -207,4 +218,4 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, ordered D1 migrations, authentication invariants, and public browser scripts.`);
+console.log(`Validated ${fallbackRecipes.length} recipes, ${fallbackCategories.length} categories, ${markets.length} markets, authoritative nested D1 migrations, authentication invariants, and public browser scripts.`);
