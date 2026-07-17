@@ -53,9 +53,10 @@ const [queue, publishedRecipes] = editorial && readiness.database
                       <p class="eyebrow">Published update · revision {item.revision}</p>
                       <h3>{item.live_title}</h3>
                       <p class="submission-card__meta">By {item.owner_name} · media {item.media_moderation_status || "missing"} · base recipe {item.base_recipe_revision}/{item.base_content_revision}</p>
-                      {stale && <div class="auth-alert auth-alert--error"><strong>Base conflict:</strong> the live recipe changed after this proposal started.</div>}
+                      {stale && <div class="auth-alert auth-alert--error"><strong>Base conflict:</strong> the live recipe changed after this proposal started. Approval remains blocked until a private rebase succeeds.</div>}
                       <div class="editor-actions editor-actions--compact">
                         <a class="button" href={`/admin/recipe-change-sets/${item.id}`}>Review private update</a>
+                        <a class="recipe-tool-button" href={`/account/change-sets/${item.id}/conflicts`}>{stale ? "Inspect three-way conflict" : "View three-way comparison"}</a>
                         <a class="recipe-tool-button" href={`/recipes/${item.slug}`}>View live recipe</a>
                       </div>
                     </article>
@@ -95,6 +96,7 @@ const [queue, publishedRecipes] = editorial && readiness.database
                       <a class="button" href={`/admin/recipes/${item.id}/change-set`}>
                         {item.active_change_set_id ? "Open private workspace" : "Create or restore proposal"}
                       </a>
+                      {item.active_change_set_id && <a class="recipe-tool-button" href={`/account/change-sets/${item.active_change_set_id}/conflicts`}>Three-way comparison</a>}
                       <a class="recipe-tool-button" href={`/recipes/${item.slug}`}>View live recipe</a>
                     </div>
                   </article>
