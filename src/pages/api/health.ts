@@ -4,6 +4,7 @@ import { fallbackRecipes } from "../../data/fallback-recipes";
 import { getAuthReadiness } from "../../lib/auth";
 import { hasDatabase } from "../../lib/db";
 import { markets } from "../../lib/market";
+import { getMediaReadiness } from "../../lib/media";
 
 type OptionalBindings = {
   DB?: D1Database;
@@ -17,6 +18,7 @@ export const GET: APIRoute = async () => {
   const bindings = env as unknown as OptionalBindings;
   const d1Bound = hasDatabase();
   const auth = getAuthReadiness();
+  const media = getMediaReadiness();
 
   return Response.json(
     {
@@ -48,6 +50,14 @@ export const GET: APIRoute = async () => {
         emailDelivery: auth.emailDelivery,
         missingCount: auth.missing.length,
         registrationMissingCount: auth.registrationMissing.length,
+      },
+      media: {
+        ready: media.ready,
+        database: media.database,
+        storage: media.storage,
+        maximumUploadBytes: media.maxBytes,
+        allowedMimeTypeCount: media.allowedMimeTypes.length,
+        publicDeliveryRequiresApproval: true,
       },
       timestamp: new Date().toISOString(),
     },
