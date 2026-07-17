@@ -16,7 +16,7 @@ CREATE TABLE categories (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   slug TEXT NOT NULL UNIQUE,
-  type TEXT NOT NULL CHECK (type IN ('meal', 'ingredient', 'cuisine', 'occasion', 'diet', 'collection')),
+  type TEXT NOT NULL CHECK (type IN ('meal', 'ingredient', 'cuisine', 'occasion', 'diet', 'collection', 'method')),
   parent_id TEXT REFERENCES categories(id) ON DELETE SET NULL,
   description TEXT,
   image_key TEXT,
@@ -33,6 +33,8 @@ CREATE TABLE recipes (
   description TEXT,
   image_key TEXT,
   image_url TEXT,
+  country_code TEXT NOT NULL DEFAULT 'GLOBAL',
+  language_code TEXT NOT NULL DEFAULT 'en',
   prep_minutes INTEGER NOT NULL DEFAULT 0 CHECK (prep_minutes >= 0),
   cook_minutes INTEGER NOT NULL DEFAULT 0 CHECK (cook_minutes >= 0),
   servings INTEGER NOT NULL DEFAULT 1 CHECK (servings > 0),
@@ -116,6 +118,7 @@ CREATE TABLE media_assets (
 
 CREATE INDEX idx_recipes_status_published ON recipes(status, published_at DESC);
 CREATE INDEX idx_recipes_featured ON recipes(is_featured, published_at DESC);
+CREATE INDEX idx_recipes_country ON recipes(country_code, status, is_featured DESC, published_at DESC);
 CREATE INDEX idx_recipes_author ON recipes(author_id, created_at DESC);
 CREATE INDEX idx_recipe_categories_category ON recipe_categories(category_id, recipe_id);
 CREATE INDEX idx_recipe_ingredients_recipe ON recipe_ingredients(recipe_id, sort_order);
