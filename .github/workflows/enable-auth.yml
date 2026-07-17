@@ -18,7 +18,7 @@ on:
         default: false
         type: boolean
       enable_recipe_submissions:
-        description: Open D1 recipe submissions, revisions, scheduling, and guarded publishing after media review is tested
+        description: Open D1 recipe submissions, revisions, private published updates, scheduling, and guarded publishing after media review is tested
         required: true
         default: false
         type: boolean
@@ -209,6 +209,15 @@ jobs:
             if (expectRecipeSubmissions && health.recipeSubmissions?.scheduledRevisionGuard !== true) failures.push("schedule revision guard is not available");
             if (expectRecipeSubmissions && health.recipeSubmissions?.scheduledMediaRevalidation !== true) failures.push("scheduled media revalidation is not available");
             if (expectRecipeSubmissions && health.recipeSubmissions?.scheduledAtomicPromotion !== true) failures.push("scheduled atomic promotion is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.publishedChangeSets !== true) failures.push("published recipe private change sets are not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.oneActivePublishedChangeSet !== true) failures.push("one-active-change-set guard is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.privatePublishedChangeSetSnapshots !== true) failures.push("private published change-set snapshots are not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.publishedChangeSetOptimisticLocking !== true) failures.push("published change-set optimistic locking is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.publishedChangeSetBaseGuard !== true) failures.push("published change-set base revision guard is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.publishedChangeSetMediaReservation !== true) failures.push("published change-set media reservation is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.publishedChangeSetApprovalMediaRevalidation !== true) failures.push("published change-set approval media revalidation is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.publishedChangeSetAtomicPromotion !== true) failures.push("published change-set atomic promotion is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.publishedChangeSetAuditEvents !== true) failures.push("published change-set audit events are not available");
             if (health.recipeSubmissions?.automaticScheduleCronConfigured !== false) failures.push("automatic schedule cron must remain disabled until separately reviewed");
             if (failures.length) {
               console.error(failures.join("\n"));
