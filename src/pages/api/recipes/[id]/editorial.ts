@@ -1,10 +1,16 @@
 import type { APIRoute } from "astro";
 import { CSRF_COOKIE, isSameOriginRequest, validateCsrfToken } from "../../../../lib/auth";
 import {
+  archiveRecipeSubmission,
+  cancelRecipeSchedule,
+  publishRecipeNow,
+  restoreArchivedRecipe,
+  scheduleRecipePublication,
+  type RecipePublicationAction,
+} from "../../../../lib/recipe-publication";
+import {
   RecipeSubmissionError,
   getRecipeSubmissionReadiness,
-  transitionRecipeEditorialStatus,
-  type EditorialAction,
 } from "../../../../lib/recipe-submissions";
 import { requestRecipeChanges } from "../../../../lib/recipe-revisions";
 
@@ -38,7 +44,14 @@ export const POST: APIRoute = async ({ request, cookies, locals, params }) => {
   }
 
   const action = input.action;
-  if (action !== "publish" && action !== "archive" && action !== "request_changes") {
+  if (
+    action !== "publish"
+    && action !== "schedule"
+    && action !== "cancel_schedule"
+    && action !== "archive"
+    && action !== "restore"
+    && action !== "request_changes"
+  ) {
     return json({ ok: false, error: "Select a valid editorial action." }, 422);
   }
   const expectedRevision = Number(input.expectedRevision);
@@ -50,20 +63,36 @@ export const POST: APIRoute = async ({ request, cookies, locals, params }) => {
 
   try {
     const reason = typeof input.reason === "string" ? input.reason : undefined;
-    const result = action === "request_changes"
-      ? await requestRecipeChanges({
-        recipeId,
-        actorId: locals.user.id,
-        expectedRevision,
-        reason,
-      })
-      : await transitionRecipeEditorialStatus({
-        recipeId,
-        actorId: locals.user.id,
-        expectedRevision,
-        action: action as EditorialAction,
-        reason,
-      });
+    const scheduledPublishAt = typeof input.scheduledPublishAt === "string" ? input.scheduledPublishAt : undefined;
+    const common = {
+      recipeId,
+      actorId: locals.user.id,
+      expectedRevision,
+      reason,
+    };
+
+    let result;
+    if (action === "request_changes") {
+      result = await requestRecipeChanges(common);
+    } else {
+      switch (action as RecipePublicationAction) {
+        case "publish":
+          result = await publishRecipeNow(common);
+          break;
+        case "schedule":
+          result = await scheduleRecipePublication({ ...common, scheduledPublishAt });
+          break;
+        case "cancel_schedule":
+          result = await cancelRecipeSchedule(common);
+          break;
+        case "archive":
+          result = await archiveRecipeSubmission(common);
+          break;
+        case "restore":
+          result = await restoreArchivedRecipe(common);
+          break;
+      }
+    }
     return json({ ok: true, result });
   } catch (error) {
     if (error instanceof RecipeSubmissionError) {
