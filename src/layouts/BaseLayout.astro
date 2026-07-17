@@ -23,6 +23,14 @@ const {
 const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url.origin);
 const market = resolveMarket(Astro.request, Astro.url);
 const returnTo = `${Astro.url.pathname}${Astro.url.search}`;
+const pathname = Astro.url.pathname;
+const navItems = [
+  { href: "/search", label: "Recipes" },
+  { href: "/categories", label: "Categories" },
+  { href: "/markets", label: "Markets" },
+  { href: "/saved", label: "Saved" },
+];
+const isCurrent = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 ---
 
 <!doctype html>
@@ -44,18 +52,21 @@ const returnTo = `${Astro.url.pathname}${Astro.url.search}`;
     <title>{title}</title>
   </head>
   <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+
     <header class="site-header">
       <div class="container header-row">
         <a class="brand" href="/" aria-label="Ozzyl Recipes home">
           <span class="brand-mark">OR</span>
           <span>Ozzyl Recipes</span>
         </a>
+
         <nav class="main-nav" aria-label="Main navigation">
-          <a href="/search">Recipes</a>
-          <a href="/categories">Categories</a>
-          <a href="/markets">Markets</a>
-          <a href="/saved">Saved</a>
+          {navItems.map((item) => (
+            <a href={item.href} aria-current={isCurrent(item.href) ? "page" : undefined}>{item.label}</a>
+          ))}
         </nav>
+
         <div class="nav-actions">
           <form class="market-form" action="/api/location" method="post">
             <input type="hidden" name="returnTo" value={returnTo} />
@@ -70,10 +81,25 @@ const returnTo = `${Astro.url.pathname}${Astro.url.search}`;
           <a class="button button--ghost" href="/login">Sign in</a>
           <a class="button" href="/recipes/new">Add recipe</a>
         </div>
+
+        <details class="mobile-menu">
+          <summary aria-label="Open navigation menu">Menu</summary>
+          <div class="mobile-menu__panel">
+            <nav aria-label="Mobile navigation">
+              {navItems.map((item) => (
+                <a href={item.href} aria-current={isCurrent(item.href) ? "page" : undefined}>{item.label}</a>
+              ))}
+            </nav>
+            <div class="mobile-menu__actions">
+              <a class="button button--ghost" href="/login">Sign in</a>
+              <a class="button" href="/recipes/new">Add recipe</a>
+            </div>
+          </div>
+        </details>
       </div>
     </header>
 
-    <main>
+    <main id="main-content" tabindex="-1">
       <slot />
     </main>
 
