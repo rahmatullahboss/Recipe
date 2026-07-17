@@ -62,3 +62,27 @@ CREATE INDEX idx_media_moderation_events_asset
   ON media_moderation_events(media_id, created_at DESC);
 CREATE INDEX idx_media_moderation_events_moderator
   ON media_moderation_events(moderator_id, created_at DESC);
+
+CREATE TRIGGER media_assets_record_moderation_transition
+AFTER UPDATE OF moderation_status ON media_assets
+WHEN OLD.moderation_status <> NEW.moderation_status
+  AND NEW.moderated_by IS NOT NULL
+BEGIN
+  INSERT INTO media_moderation_events (
+    id,
+    media_id,
+    moderator_id,
+    previous_status,
+    next_status,
+    reason,
+    created_at
+  ) VALUES (
+    'media_event_' || lower(hex(randomblob(16))),
+    NEW.id,
+    NEW.moderated_by,
+    OLD.moderation_status,
+    NEW.moderation_status,
+    NEW.moderation_reason,
+    COALESCE(NEW.moderated_at, CURRENT_TIMESTAMP)
+  );
+END;
