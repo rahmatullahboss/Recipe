@@ -1,26 +1,21 @@
 # Cloudflare and GitHub CI/CD Setup
 
-This project currently deploys without D1. The international static catalogue is used until the D1 account limit is available again.
+The project currently deploys without D1. The international static catalogue and browser-local kitchen tools remain operational while the future D1 database and account system stay disabled.
 
 ## 1. Enable the Cloudflare services
 
-In the Cloudflare dashboard, confirm the following for the target account:
+In the target Cloudflare account, confirm:
 
-1. Workers & Pages is enabled and a `workers.dev` subdomain has been registered.
-2. R2 has been activated. The free included usage is sufficient for initial development, but Cloudflare still requires the R2 checkout/activation flow.
-3. Cloudflare Images is available if runtime image transformations will be used.
-4. A domain is active in Cloudflare only if a custom production domain will be connected immediately.
+1. Workers & Pages is enabled and a `workers.dev` subdomain is registered.
+2. R2 is activated.
+3. Cloudflare Images is available if runtime transformations will be used.
+4. A domain is active in Cloudflare only when a custom production hostname will be connected.
 
-Wrangler can automatically provision the `SESSION` KV namespace, `MEDIA` R2 bucket, and `IMAGES` binding during the first deployment because the default config declares draft bindings without account-specific IDs.
+Wrangler can provision the draft `SESSION` KV namespace, `MEDIA` R2 bucket, and `IMAGES` binding during the initial D1-free deployment.
 
 ## 2. Create the deployment API token
 
-In Cloudflare:
-
-1. Open **My Profile → API Tokens → Create Token**.
-2. Start from the **Edit Cloudflare Workers** template.
-3. Restrict the token to the Cloudflare account used for this project.
-4. Keep or add these permissions:
+Open **My Profile → API Tokens → Create Token**, start from **Edit Cloudflare Workers**, restrict it to the target account, and keep these permissions.
 
 ### Required now
 
@@ -35,63 +30,42 @@ In Cloudflare:
 
 - Zone → Workers Routes → Edit for the selected zone
 
-### Required for future Cloudflare Images uploads/management
+### Required for Cloudflare Images management
 
 - Account → Cloudflare Images → Edit
 
-### Required later for D1 migrations
+### Required later for D1
 
 - Account → D1 → Edit
 
-Do not save the token in the repository or in a committed `.env` file.
+Never commit the token or place it in a tracked environment file.
 
-## 3. Find the Cloudflare Account ID
+## 3. Find the Account ID
 
-Open the target Cloudflare account. Copy the **Account ID** from the dashboard account details or from a zone overview.
+Copy the **Account ID** from the target Cloudflare account dashboard or a zone overview.
 
-## 4. Configure GitHub secrets
+## 4. Configure GitHub deployment secrets
 
-In the GitHub repository:
-
-1. Open **Settings → Environments**.
-2. Create an environment named `production`.
-3. Add these environment secrets:
+Create a GitHub environment named `production` and add:
 
 ```text
 CLOUDFLARE_ACCOUNT_ID
 CLOUDFLARE_API_TOKEN
 ```
 
-Recommended environment protection:
+Recommended protection:
 
 - Restrict deployment branches to `main`.
-- Optionally require manual approval before production deployments.
-- Prevent administrators from bypassing protection rules if stronger release control is required.
+- Require approval for production deployments where appropriate.
+- Prevent protection-rule bypass for stricter release control.
 
 ## 5. Enable GitHub Actions
 
-Open **Settings → Actions → General** and confirm:
+Under **Settings → Actions → General**, allow repository Actions and verified creator actions. Workflow permissions need read access to repository contents. The workflows request their own minimal additional permissions.
 
-- Actions are allowed for the repository.
-- Actions from GitHub and verified creators are allowed.
-- Workflow permissions have at least read access to repository contents.
-- The account or organisation has available Actions minutes and no billing-related Actions restriction.
+## 6. Current automatic D1-free deployment
 
-The workflows request their own minimal permissions.
-
-### Current repository warning
-
-At the time this foundation was prepared, GitHub was marking workflow jobs as failed before creating any workflow step or downloadable log. If that continues, check repository Actions permissions, account or organisation Actions policy, available Actions minutes, and billing status before investigating application code. A normal build failure should show checkout, install, or build steps with logs.
-
-## 6. Current automatic deployment
-
-The default deployment is handled by:
-
-```text
-.github/workflows/deploy.yml
-```
-
-It runs when changes reach `main` and performs:
+`.github/workflows/deploy.yml` runs after changes reach `main`:
 
 ```bash
 npm ci
@@ -99,15 +73,9 @@ npm run build
 wrangler deploy --config wrangler.jsonc
 ```
 
-`wrangler.jsonc` contains no D1 binding. The deployed application automatically uses `src/data/fallback-recipes.ts`.
+`wrangler.jsonc` has no D1 binding. The application uses `src/data/fallback-recipes.ts` and keeps authentication unavailable.
 
-## 7. First deployment checks
-
-After the first successful workflow:
-
-1. Open the deployment URL shown in the GitHub Actions summary.
-2. Check `/api/health`.
-3. Confirm the response contains:
+After deployment, `/api/health` should include:
 
 ```json
 {
@@ -117,35 +85,32 @@ After the first successful workflow:
 }
 ```
 
-4. Open the homepage from different countries or use the market selector.
-5. Confirm an R2 bucket and KV namespace were created and bound to the Worker.
-6. Check Worker logs and observability in Cloudflare.
+The workflow also checks ten supported markets plus KV, R2, and Images binding readiness.
 
-## 8. Connect a custom domain
+## 7. Connect a custom domain
 
-After the Worker is deployed:
+After the Worker deploys:
 
 1. Open **Workers & Pages → ozzyl-recipes → Settings → Domains & Routes**.
-2. Add the production custom domain.
-3. Keep the Worker name and `wrangler.jsonc` as the configuration source of truth.
-4. Re-run the production deployment after DNS and certificate status are active.
+2. Add the final production hostname.
+3. Keep Wrangler configuration as the deployment source of truth.
+4. Re-run deployment after DNS and certificate status become active.
 
-## 9. Enable D1 later
+## 8. Enable D1 later
 
-Do not run this section while the account is still at its D1 limit.
+Do not run this while the account is at its D1 limit.
 
 When D1 becomes available:
 
-1. Add **D1 Edit** to `CLOUDFLARE_API_TOKEN` or replace the token with one that has it.
+1. Add **D1 Edit** to the deployment API token.
 2. Open **GitHub → Actions → Enable D1 and Deploy**.
-3. Select **Run workflow**.
-4. Enter exactly:
+3. Run it with the exact confirmation value:
 
 ```text
 ENABLE_D1
 ```
 
-The workflow will:
+The workflow performs:
 
 ```bash
 npm ci
@@ -155,34 +120,93 @@ wrangler d1 migrations apply DB --remote --config wrangler.d1.jsonc
 wrangler deploy --config wrangler.d1.jsonc
 ```
 
-The first deployment provisions the draft D1 binding. Until the schema exists, database queries automatically fall back to the versioned static catalogue. The workflow then applies all pending migrations and performs a final deployment against the migrated database.
+The first deployment provisions the draft D1 binding. Public recipe queries retain static fallback protection until migrations finish.
 
-The D1 config uses the `DB` binding and the migrations in `migrations/`.
+### Authoritative migration layout
 
-After deployment, `/api/health` should return:
+Wrangler applies only:
+
+```text
+migrations/d1/0001_initial/migration.sql
+migrations/d1/0002_seed/migration.sql
+migrations/d1/0003_market_coverage/migration.sql
+migrations/d1/0004_auth_accounts/migration.sql
+```
+
+`wrangler.d1.jsonc` uses:
+
+```jsonc
+"migrations_pattern": "migrations/d1/*/migration.sql"
+```
+
+Root-level SQL files are legacy development references and are outside the Wrangler migration execution path.
+
+After migration, `/api/health` should report:
 
 ```json
 {
-  "dataMode": "d1"
+  "dataMode": "d1",
+  "authentication": {
+    "enabled": false,
+    "registrationEnabled": false
+  }
 }
 ```
 
+D1 data can therefore run while accounts remain closed.
+
+## 9. Enable D1 authentication separately
+
+Authentication is intentionally controlled by two independent flags in `wrangler.d1.jsonc`:
+
+```jsonc
+"AUTH_ENABLED": "false",
+"AUTH_REGISTRATION_ENABLED": "false"
+```
+
+Do not enable either flag merely because D1 migrations succeeded.
+
+Core sign-in later requires Worker bindings/secrets for:
+
+```text
+DB
+SESSION
+AUTH_PASSWORD_PEPPER
+AUTH_FINGERPRINT_PEPPER
+TURNSTILE_SITE_KEY
+TURNSTILE_SECRET_KEY
+```
+
+Public registration additionally requires:
+
+```text
+AUTH_EMAIL_WEBHOOK_URL
+AUTH_EMAIL_WEBHOOK_TOKEN
+AUTH_REGISTRATION_ENABLED=true
+```
+
+The sender address may be configured as `AUTH_FROM_EMAIL` after its domain is verified.
+
+Follow [D1 Authentication Activation](./D1_AUTH_SETUP.md) for the exact order, webhook contract, security behavior, testing, and rollback procedure. Do not place any password pepper, Turnstile secret, or webhook bearer token in this repository.
+
 ## 10. Rollback strategy
 
-- Cloudflare Worker deployments can be rolled back from the Worker deployment history.
-- D1 creates a backup before applying migrations.
-- A failed D1 migration is rolled back while earlier successful migrations remain applied.
-- If a D1 query fails, public discovery routes fall back to the versioned static catalogue.
-- The D1-free configuration can be redeployed if the database is temporarily unavailable.
+- Worker deployments can be rolled back from Cloudflare deployment history.
+- D1 creates a backup before migrations.
+- A failed migration rolls back while earlier successful migrations remain applied.
+- Public D1 query failures fall back to the versioned catalogue.
+- `wrangler.jsonc` can redeploy the D1-free application.
+- Setting both auth flags to `false` disables account access without taking recipe discovery offline.
 
-## 11. Do not add yet
+## 11. Production verification
 
-The current workflows do not require these secrets yet:
+Before considering D1 authentication ready:
 
-- Email provider API key
-- Authentication/session signing secret
-- Turnstile secret key
-- Analytics API token
-- AI provider keys
-
-Add each secret only when its feature is implemented and declare required Worker secrets in `wrangler.jsonc` at that time.
+1. Confirm all nested migrations are applied.
+2. Confirm `/api/health` reports D1/KV readiness but does not expose secret values.
+3. Confirm Turnstile is restricted to the final hostname.
+4. Confirm verification links are single-use and expire after 30 minutes.
+5. Confirm an unverified account cannot create a session.
+6. Confirm five failed password checks lock an account for 15 minutes.
+7. Confirm logout deletes the KV session and account `auth_version` invalidates older sessions.
+8. Confirm Terms and Privacy text have been approved for the operating company and jurisdiction before registration is enabled.
