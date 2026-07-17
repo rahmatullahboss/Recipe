@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
-import { CSRF_COOKIE, isSameOriginRequest, validateCsrfToken } from "../../../lib/auth";
+import { CSRF_COOKIE, consumeRateLimit, isSameOriginRequest, validateCsrfToken } from "../../../lib/auth";
+import { validateRecipeDraft } from "../../../lib/recipe-draft";
 import { getRecipeSubmissionReadiness } from "../../../lib/recipe-submissions";
 
 const MAX_BODY_BYTES = 100_000;
@@ -34,5 +35,11 @@ export const POST: APIRoute = async ({ request, cookies, locals }) => {
   if (!csrfValid || input.sessionCsrf !== locals.session.csrfToken) {
     return json({ ok: false, error: "Request authorization expired." }, 403);
   }
-  return json({ ok: false, error: "Recipe submission validation is pending." }, 503);
+
+  const allowed = await consumeRateLimit(request, "recipe-submit", locals.user.id, 10, 24 * 60 * 60);
+  if (!allowed) return json({ ok: false, error: "Recipe submission limit reached." }, 429);
+
+  const validation = validateRecipeDraft(input.draft);
+  if (!validation.valid || !validation.draft) return json({ ok: false, errors: validation.errors }, 422);
+  return json({ ok: false, error: "Recipe submission storage is pending." }, 503);
 };
