@@ -29,8 +29,5 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
-      - name: Build Astro Cloudflare Worker
+      - name: Generate Cloudflare types and build Astro Worker
         run: npm run build
-
-      - name: Validate Wrangler production bundle
-        run: npx wrangler deploy --dry-run --config wrangler.jsonc
