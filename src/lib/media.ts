@@ -3,6 +3,7 @@ import { createRandomToken, sha256Base64Url } from "./auth";
 
 export const MAX_MEDIA_BYTES = 8 * 1024 * 1024;
 export const MEDIA_INTENT_TTL_SECONDS = 10 * 60;
+export const MEDIA_MODERATION_EVENT_TABLE = "media_moderation_events";
 
 export type MediaPurpose = "recipe_hero" | "recipe_step" | "avatar";
 export type MediaModerationStatus = "pending" | "approved" | "rejected" | "quarantined";
