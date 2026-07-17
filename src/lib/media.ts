@@ -49,11 +49,11 @@ export type ValidatedImage = {
 };
 
 const bindings = env as unknown as MediaBindings;
-const allowedMimeTypes = new Map([
+const allowedMimeTypes = new Map<ValidatedImage["mimeType"], ValidatedImage["extension"]>([
   ["image/jpeg", "jpg"],
   ["image/png", "png"],
   ["image/webp", "webp"],
-] as const);
+]);
 
 function getDatabase(): D1Database | undefined {
   return bindings.DB;
@@ -61,6 +61,17 @@ function getDatabase(): D1Database | undefined {
 
 function getBucket(): R2Bucket | undefined {
   return bindings.MEDIA;
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function sha256Buffer(buffer: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", buffer);
+  return bytesToBase64Url(new Uint8Array(digest));
 }
 
 export function getMediaReadiness() {
@@ -97,14 +108,15 @@ export function validateMediaIntentInput(input: {
   altText?: unknown;
 }) {
   const filename = cleanFilename(input.filename);
-  const mimeType = typeof input.mimeType === "string" ? input.mimeType.trim().toLowerCase() : "";
+  const mimeTypeText = typeof input.mimeType === "string" ? input.mimeType.trim().toLowerCase() : "";
+  const mimeType = mimeTypeText as ValidatedImage["mimeType"];
   const byteSize = Number(input.byteSize);
   const purpose = normalisePurpose(input.purpose);
   const altText = cleanAltText(input.altText);
   const errors: string[] = [];
 
   if (!filename) errors.push("Choose an image file with a valid filename.");
-  if (!allowedMimeTypes.has(mimeType as never)) errors.push("Only JPEG, PNG, and WebP images are accepted.");
+  if (!allowedMimeTypes.has(mimeType)) errors.push("Only JPEG, PNG, and WebP images are accepted.");
   if (!Number.isInteger(byteSize) || byteSize < 1 || byteSize > MAX_MEDIA_BYTES) {
     errors.push(`Image size must be between 1 byte and ${MAX_MEDIA_BYTES} bytes.`);
   }
@@ -114,7 +126,7 @@ export function validateMediaIntentInput(input: {
     valid: errors.length === 0,
     errors,
     filename,
-    mimeType: mimeType as "image/jpeg" | "image/png" | "image/webp",
+    mimeType,
     byteSize,
     purpose,
     altText: altText || null,
@@ -122,10 +134,12 @@ export function validateMediaIntentInput(input: {
 }
 
 function createR2Key(userId: string, extension: string): string {
+  const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
+  if (!safeUserId) throw new Error("Media owner identifier is invalid.");
   const now = new Date();
   const year = String(now.getUTCFullYear());
   const month = String(now.getUTCMonth() + 1).padStart(2, "0");
-  return `uploads/${userId}/${year}/${month}/${crypto.randomUUID()}.${extension}`;
+  return `uploads/${safeUserId}/${year}/${month}/${crypto.randomUUID()}.${extension}`;
 }
 
 export async function createMediaUploadIntent(userId: string, input: {
@@ -135,8 +149,7 @@ export async function createMediaUploadIntent(userId: string, input: {
   purpose?: unknown;
   altText?: unknown;
 }) {
-  const readiness = getMediaReadiness();
-  if (!readiness.ready) throw new Error("Media storage is not configured.");
+  if (!getMediaReadiness().ready) throw new Error("Media storage is not configured.");
 
   const validated = validateMediaIntentInput(input);
   if (!validated.valid) return { ok: false as const, errors: validated.errors };
@@ -172,10 +185,7 @@ export async function createMediaUploadIntent(userId: string, input: {
     token,
     uploadUrl: "/api/media/upload",
     expiresAt,
-    expected: {
-      mimeType: validated.mimeType,
-      byteSize: validated.byteSize,
-    },
+    expected: { mimeType: validated.mimeType, byteSize: validated.byteSize },
   };
 }
 
@@ -234,6 +244,7 @@ function parseJpeg(bytes: Uint8Array): { width: number; height: number } | null 
   if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) return null;
   const sofMarkers = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
   let offset = 2;
+
   while (offset + 8 < bytes.length) {
     if (bytes[offset] !== 0xff) {
       offset += 1;
@@ -265,11 +276,8 @@ function parseWebp(bytes: Uint8Array): { width: number; height: number } | null 
 
   const chunk = String.fromCharCode(...bytes.slice(12, 16));
   const dataOffset = 20;
-  if (chunk === "VP8X" && bytes.length >= 30) {
-    return {
-      width: 1 + readUint24LE(bytes, 24),
-      height: 1 + readUint24LE(bytes, 27),
-    };
+  if (chunk === "VP8X") {
+    return { width: 1 + readUint24LE(bytes, 24), height: 1 + readUint24LE(bytes, 27) };
   }
   if (chunk === "VP8 " && bytes.length >= dataOffset + 10) {
     if (bytes[dataOffset + 3] !== 0x9d || bytes[dataOffset + 4] !== 0x01 || bytes[dataOffset + 5] !== 0x2a) return null;
@@ -323,17 +331,8 @@ export async function validateImageBytes(buffer: ArrayBuffer, declaredMimeType: 
     width: dimensions.width,
     height: dimensions.height,
     byteSize: buffer.byteLength,
-    sha256: await sha256Base64Url(String.fromCharCode(...bytes.slice(0, Math.min(bytes.length, 65535))) + `:${buffer.byteLength}:${await sha256Base64Url(bytesToString(bytes))}`),
+    sha256: await sha256Buffer(buffer),
   };
-}
-
-function bytesToString(bytes: Uint8Array): string {
-  let binary = "";
-  const chunkSize = 8192;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)));
-  }
-  return binary;
 }
 
 export async function storeValidatedImage(intent: UploadIntentRow, buffer: ArrayBuffer, image: ValidatedImage) {
@@ -345,10 +344,7 @@ export async function storeValidatedImage(intent: UploadIntentRow, buffer: Array
   let stored = false;
   try {
     const object = await bucket.put(intent.r2_key, buffer, {
-      httpMetadata: {
-        contentType: image.mimeType,
-        cacheControl: "private, no-store",
-      },
+      httpMetadata: { contentType: image.mimeType, cacheControl: "private, no-store" },
       customMetadata: {
         assetId,
         ownerId: intent.owner_id,
@@ -358,7 +354,7 @@ export async function storeValidatedImage(intent: UploadIntentRow, buffer: Array
     });
     stored = true;
 
-    await database.batch([
+    const results = await database.batch([
       database.prepare(
         `INSERT INTO media_assets (
           id, owner_id, r2_key, mime_type, width, height, byte_size, alt_text,
@@ -385,6 +381,7 @@ export async function storeValidatedImage(intent: UploadIntentRow, buffer: Array
          WHERE id = ? AND status = 'consumed'`,
       ).bind(intent.id),
     ]);
+    if (!results.every((result) => result.success)) throw new Error("Media metadata could not be committed.");
 
     return {
       id: assetId,
@@ -448,14 +445,16 @@ export async function moderateMediaAsset(input: {
   if (!asset) return false;
 
   const reason = input.reason?.trim().slice(0, 1000) || null;
-  const results = await database.batch([
-    database.prepare(
-      `UPDATE media_assets
-       SET moderation_status = ?, moderation_reason = ?, moderated_by = ?,
-           moderated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ? AND moderation_status = ?`,
-    ).bind(input.nextStatus, reason, input.moderatorId, asset.id, asset.moderation_status),
-    database.prepare(
+  const update = await database.prepare(
+    `UPDATE media_assets
+     SET moderation_status = ?, moderation_reason = ?, moderated_by = ?,
+         moderated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND moderation_status = ?`,
+  ).bind(input.nextStatus, reason, input.moderatorId, asset.id, asset.moderation_status).run();
+  if (!update.success || (update.meta.changes ?? 0) !== 1) return false;
+
+  try {
+    await database.prepare(
       `INSERT INTO media_moderation_events (
         id, media_id, moderator_id, previous_status, next_status, reason
       ) VALUES (?, ?, ?, ?, ?, ?)`,
@@ -466,7 +465,9 @@ export async function moderateMediaAsset(input: {
       asset.moderation_status,
       input.nextStatus,
       reason,
-    ),
-  ]);
-  return Boolean(results[0]?.success && (results[0].meta.changes ?? 0) === 1 && results[1]?.success);
+    ).run();
+  } catch (error) {
+    console.error("Media moderation event could not be recorded after status update.", error);
+  }
+  return true;
 }
