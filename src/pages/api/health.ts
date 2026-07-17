@@ -1,4 +1,5 @@
 import type { APIRoute } from "astro";
+import { hasDatabase } from "../../lib/db";
 
 export const GET: APIRoute = async () => {
   return Response.json(
@@ -6,6 +7,7 @@ export const GET: APIRoute = async () => {
       ok: true,
       service: "ozzyl-recipes",
       runtime: "cloudflare-workers",
+      dataMode: hasDatabase() ? "d1" : "static-fallback",
       timestamp: new Date().toISOString(),
     },
     {
