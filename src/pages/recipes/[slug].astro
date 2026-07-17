@@ -1,7 +1,7 @@
 ---
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import { getRecipeBySlug } from "../../lib/db";
-import { getMarket } from "../../lib/market";
+import { getMarket, resolveMarket } from "../../lib/market";
 
 const slug = Astro.params.slug;
 const recipe = slug ? await getRecipeBySlug(slug) : null;
@@ -12,6 +12,11 @@ if (!recipe) {
 
 const totalMinutes = recipe.prep_minutes + recipe.cook_minutes;
 const recipeMarket = recipe.country_code === "GLOBAL" ? null : getMarket(recipe.country_code);
+const visitorMarket = resolveMarket(Astro.request, Astro.url);
+const nativeMeasurement = recipeMarket?.measurementSystem ?? "metric";
+const defaultMeasurement = visitorMarket.measurementSystem === nativeMeasurement
+  ? "original"
+  : visitorMarket.measurementSystem;
 const cuisine = recipe.categories.find((category) => category.type === "cuisine")?.name ?? recipeMarket?.name ?? "International";
 const schema = {
   "@context": "https://schema.org",
@@ -25,6 +30,7 @@ const schema = {
   totalTime: `PT${totalMinutes}M`,
   recipeYield: `${recipe.servings} servings`,
   recipeCuisine: cuisine,
+  recipeCategory: recipe.categories.map((category) => category.name),
   inLanguage: "en",
   recipeIngredient: recipe.ingredients.map((ingredient) =>
     [ingredient.amount, ingredient.unit, ingredient.item, ingredient.note ? `(${ingredient.note})` : ""]
@@ -52,70 +58,119 @@ const schema = {
 >
   <script type="application/ld+json" set:html={JSON.stringify(schema)}></script>
 
-  <section class="recipe-header">
-    <div class="container">
-      <div class="breadcrumbs"><a href="/">Home</a> / <a href="/search">Recipes</a> / {recipe.title}</div>
-      <div class="chips">
-        {recipeMarket && <span class="chip">{recipeMarket.name}</span>}
-        {recipe.categories.map((category) => (
-          <a class="chip" href={`/search?q=${encodeURIComponent(category.name)}`}>{category.name}</a>
-        ))}
+  <div
+    data-recipe-tools
+    data-original-servings={recipe.servings}
+    data-default-system={defaultMeasurement}
+  >
+    <section class="recipe-header">
+      <div class="container">
+        <div class="breadcrumbs"><a href="/">Home</a> / <a href="/search">Recipes</a> / {recipe.title}</div>
+        <div class="chips">
+          {recipeMarket && <a class="chip" href={`/markets/${recipeMarket.code.toLowerCase()}`}>{recipeMarket.name}</a>}
+          {recipe.categories.map((category) => (
+            <a class="chip" href={`/categories/${category.slug}`}>{category.name}</a>
+          ))}
+        </div>
+        <h1 class="recipe-title">{recipe.title}</h1>
+        <p class="recipe-intro">{recipe.description ?? recipe.summary}</p>
+        <div class="recipe-info">
+          <span>By {recipe.author_name}</span>
+          <span class="rating">★ {recipe.average_rating.toFixed(1)} ({recipe.rating_count} ratings)</span>
+          <span>{totalMinutes} minutes</span>
+          <span><span data-serving-output>{recipe.servings}</span> servings</span>
+          <span>{recipe.difficulty}</span>
+          {recipeMarket && <span>{nativeMeasurement === "us" ? "US recipe" : "Metric recipe"}</span>}
+        </div>
+        <div class="recipe-actions" aria-label="Recipe actions">
+          <button
+            class="save-button"
+            type="button"
+            data-save-recipe={recipe.slug}
+            aria-pressed="false"
+          >
+            <span aria-hidden="true">♡</span>
+            <span data-save-label>Save</span>
+          </button>
+          <button class="recipe-tool-button" type="button" data-print-recipe>Print recipe</button>
+          <button class="recipe-tool-button" type="button" data-copy-recipe>Copy link</button>
+        </div>
       </div>
-      <h1 class="recipe-title">{recipe.title}</h1>
-      <p class="recipe-intro">{recipe.description ?? recipe.summary}</p>
-      <div class="recipe-info">
-        <span>By {recipe.author_name}</span>
-        <span class="rating">★ {recipe.average_rating.toFixed(1)} ({recipe.rating_count} ratings)</span>
-        <span>{totalMinutes} minutes</span>
-        <span>{recipe.servings} servings</span>
-        <span>{recipe.difficulty}</span>
-        {recipeMarket && <span>{recipeMarket.measurementSystem === "us" ? "US measurements" : "Metric measurements"}</span>}
+    </section>
+
+    <section class="container">
+      <div class="recipe-hero-image">
+        <img
+          src={recipe.image_url ?? "/images/recipe-placeholder.svg"}
+          alt={recipe.title}
+          width="1400"
+          height="700"
+        />
       </div>
-    </div>
-  </section>
+    </section>
 
-  <section class="container">
-    <div class="recipe-hero-image">
-      <img
-        src={recipe.image_url ?? "/images/recipe-placeholder.svg"}
-        alt={recipe.title}
-        width="1400"
-        height="700"
-      />
-    </div>
-  </section>
+    <section class="section">
+      <div class="container recipe-content">
+        <aside class="recipe-panel">
+          <div class="recipe-controls">
+            <div class="recipe-control-group">
+              <label class="recipe-control-label" for="serving-count">Servings</label>
+              <div class="serving-control">
+                <input
+                  id="serving-count"
+                  type="number"
+                  min="0.5"
+                  max="100"
+                  step="0.5"
+                  value={recipe.servings}
+                  data-serving-input
+                />
+                <span>Adjust ingredient quantities</span>
+              </div>
+            </div>
 
-  <section class="section">
-    <div class="container recipe-content">
-      <aside class="recipe-panel">
-        <h2>Ingredients</h2>
-        <ul class="ingredient-list">
-          {recipe.ingredients.map((ingredient) => {
-            const amount = [ingredient.amount, ingredient.unit].filter(Boolean).join(" ");
-            return (
-              <li>
-                <span class="ingredient-amount">{amount || "As needed"}</span>
+            <div class="recipe-control-group">
+              <span class="recipe-control-label">Measurements</span>
+              <div class="measurement-toggle" role="group" aria-label="Ingredient measurement system">
+                <button class="recipe-tool-button" type="button" data-measurement-system="original" aria-pressed="false">Original</button>
+                <button class="recipe-tool-button" type="button" data-measurement-system="us" aria-pressed="false">US</button>
+                <button class="recipe-tool-button" type="button" data-measurement-system="metric" aria-pressed="false">Metric</button>
+              </div>
+              <p class="conversion-note">Conversions are approximate. For precision baking, use the recipe's original measurements.</p>
+            </div>
+          </div>
+
+          <h2>Ingredients</h2>
+          <ul class="ingredient-list">
+            {recipe.ingredients.map((ingredient) => (
+              <li data-ingredient data-amount={ingredient.amount ?? ""} data-unit={ingredient.unit ?? ""}>
+                <span class="ingredient-amount">
+                  <span data-converted-amount>{ingredient.amount ?? "As needed"}</span>
+                  <span data-converted-unit>{ingredient.unit ?? ""}</span>
+                </span>
                 <span>
                   {ingredient.item}
                   {ingredient.note && <small> — {ingredient.note}</small>}
                 </span>
               </li>
-            );
-          })}
-        </ul>
-      </aside>
+            ))}
+          </ul>
+        </aside>
 
-      <div class="directions">
-        <h2>Directions</h2>
-        <ol class="step-list">
-          {recipe.steps.map((step) => (
-            <li>
-              <p>{step.instruction}</p>
-              {step.timer_seconds && <small>{Math.ceil(step.timer_seconds / 60)} minute timer</small>}
-            </li>
-          ))}
-        </ol>
+        <div class="directions">
+          <h2>Directions</h2>
+          <ol class="step-list">
+            {recipe.steps.map((step) => (
+              <li>
+                <p>{step.instruction}</p>
+                {step.timer_seconds && <small>{Math.ceil(step.timer_seconds / 60)} minute timer</small>}
+              </li>
+            ))}
+          </ol>
+        </div>
       </div>
-    </div>
-  </section>
+    </section>
+  </div>
+
+  <script src="/scripts/recipe-tools.js" defer></script>
 </BaseLayout>
