@@ -2,19 +2,22 @@
 import BaseLayout from "../layouts/BaseLayout.astro";
 import RecipeCard from "../components/RecipeCard.astro";
 import { listRecipes } from "../lib/db";
+import { resolveMarket } from "../lib/market";
 
 const query = Astro.url.searchParams.get("q")?.trim() ?? "";
-const recipes = await listRecipes({ search: query || undefined, limit: 30 });
-const title = query ? `Search results for “${query}” — Ozzyl Recipes` : "Browse Recipes — Ozzyl Recipes";
+const market = resolveMarket(Astro.request, Astro.url);
+const recipes = await listRecipes({ search: query || undefined, country: market.code, limit: 30 });
+const title = query ? `Search results for “${query}” — Ozzyl Recipes` : "Browse International Recipes — Ozzyl Recipes";
 ---
 
-<BaseLayout title={title} description="Search and browse recipes by title, ingredient, cuisine, and cooking style.">
+<BaseLayout title={title} description={`Search international recipes with results prioritised for ${market.name}.`}>
   <section class="section">
     <div class="container">
-      <p class="eyebrow">Recipe finder</p>
-      <h1 class="section-title">{query ? `Results for “${query}”` : "Browse all recipes"}</h1>
+      <p class="eyebrow">Recipe finder · {market.name}</p>
+      <h1 class="section-title">{query ? `Results for “${query}”` : "Browse international recipes"}</h1>
+      <p class="section-copy">Recipes from your selected market appear first, followed by relevant dishes from the wider catalogue.</p>
       <form class="search-box" action="/search" method="get">
-        <input name="q" type="search" value={query} placeholder="Search recipes..." aria-label="Search recipes" />
+        <input name="q" type="search" value={query} placeholder="Search recipes, ingredients, or cuisines..." aria-label="Search recipes" />
         <button class="button" type="submit">Search</button>
       </form>
 
