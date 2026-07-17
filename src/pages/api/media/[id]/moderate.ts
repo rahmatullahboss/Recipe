@@ -37,6 +37,12 @@ export const POST: APIRoute = async ({ request, cookies, locals, params }) => {
     return json({ ok: false, error: "Select a valid moderation status." }, 422);
   }
 
+  const reason = typeof input.reason === "string" ? input.reason.trim() : "";
+  if ((status === "rejected" || status === "quarantined") && reason.length < 5) {
+    return json({ ok: false, error: "Add a moderation reason before rejecting or quarantining media." }, 422);
+  }
+  if (reason.length > 1000) return json({ ok: false, error: "Moderation reason is too long." }, 422);
+
   const mediaId = params.id?.trim() ?? "";
   if (!mediaId || mediaId.length > 100) return json({ ok: false, error: "Invalid media asset." }, 400);
 
@@ -45,7 +51,7 @@ export const POST: APIRoute = async ({ request, cookies, locals, params }) => {
       mediaId,
       moderatorId: locals.user.id,
       nextStatus: status as MediaModerationStatus,
-      reason: typeof input.reason === "string" ? input.reason : undefined,
+      reason: reason || undefined,
     });
     if (!updated) return json({ ok: false, error: "Media asset was not found or changed concurrently." }, 409);
     return json({ ok: true, mediaId, moderationStatus: status });
