@@ -115,3 +115,55 @@ WHEN NEW.status IN ('draft', 'review', 'changes_requested')
 BEGIN
   SELECT RAISE(ABORT, 'active change set requires an owner-matched published recipe');
 END;
+
+CREATE TRIGGER recipe_change_sets_media_not_assigned_elsewhere_insert
+BEFORE INSERT ON recipe_change_sets
+WHEN NEW.media_asset_id IS NOT NULL
+  AND NEW.status IN ('draft', 'review', 'changes_requested')
+  AND EXISTS (
+    SELECT 1 FROM recipes r
+    WHERE r.media_asset_id = NEW.media_asset_id
+      AND r.id <> NEW.recipe_id
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'change-set media is assigned to another recipe');
+END;
+
+CREATE TRIGGER recipe_change_sets_media_not_assigned_elsewhere_update
+BEFORE UPDATE OF recipe_id, media_asset_id, status ON recipe_change_sets
+WHEN NEW.media_asset_id IS NOT NULL
+  AND NEW.status IN ('draft', 'review', 'changes_requested')
+  AND EXISTS (
+    SELECT 1 FROM recipes r
+    WHERE r.media_asset_id = NEW.media_asset_id
+      AND r.id <> NEW.recipe_id
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'change-set media is assigned to another recipe');
+END;
+
+CREATE TRIGGER recipes_media_not_reserved_by_change_set_insert
+BEFORE INSERT ON recipes
+WHEN NEW.media_asset_id IS NOT NULL
+  AND EXISTS (
+    SELECT 1 FROM recipe_change_sets cs
+    WHERE cs.media_asset_id = NEW.media_asset_id
+      AND cs.recipe_id <> NEW.id
+      AND cs.status IN ('draft', 'review', 'changes_requested')
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'recipe media is reserved by an active change set');
+END;
+
+CREATE TRIGGER recipes_media_not_reserved_by_change_set_update
+BEFORE UPDATE OF media_asset_id ON recipes
+WHEN NEW.media_asset_id IS NOT NULL
+  AND EXISTS (
+    SELECT 1 FROM recipe_change_sets cs
+    WHERE cs.media_asset_id = NEW.media_asset_id
+      AND cs.recipe_id <> NEW.id
+      AND cs.status IN ('draft', 'review', 'changes_requested')
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'recipe media is reserved by an active change set');
+END;
