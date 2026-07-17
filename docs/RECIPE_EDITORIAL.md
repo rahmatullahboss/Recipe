@@ -1,289 +1,208 @@
 # Guarded Recipe Submission, Revision, and Editorial Publishing
 
-Recipe submission, requested changes, contributor resubmission, publication, and archival are implemented for the D1 deployment but remain disabled in checked-in configuration.
+Recipe submission, requested changes, contributor resubmission, immediate publication, scheduled publication, archival, and archive restoration are implemented for the D1 deployment but remain disabled in checked-in configuration.
 
 ```jsonc
 "RECIPE_SUBMISSIONS_ENABLED": "false"
 ```
 
-The D1-free public application and browser-local new-recipe editor continue to work without this feature. Read [`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md) for the complete project status and continuation prompt.
+The D1-free public application and browser-local new-recipe editor continue to work without this feature.
 
-## Implementation status
+## Capability status
 
 | Capability | Code status | Activation status |
 | --- | --- | --- |
 | Initial contributor submission | Complete | Disabled |
 | Private editor/admin review | Complete | Disabled |
-| Media-gated publication | Complete | Disabled |
-| Editorial archive | Complete | Disabled |
+| Approved-media/derivative-gated publication | Complete | Disabled |
 | Editor-requested changes | Complete | Disabled |
-| Owner-only revision editor | Complete | Disabled |
+| Owner-only correction editor | Complete | Disabled |
 | Race-safe resubmission | Complete | Disabled |
 | Immutable content snapshots | Complete | Disabled |
-| Published-recipe revisioning | Not implemented | Not available |
-| Scheduled publishing and archive restore | Not implemented | Not available |
+| Future UTC publication schedule | Complete | Disabled |
+| Schedule replace/cancellation | Complete | Disabled |
+| Guarded manual due processor | Complete | Disabled |
+| Archive restoration to review | Complete | Disabled |
+| Contributor revision of published recipe | Not implemented | Not available |
+| Automatic Cron/queue processor | Not configured | Not available |
 
 ## Activation dependencies
 
-Recipe submissions and revisions become ready only when authentication, D1, private R2 storage, the Cloudflare Images binding, moderated derivative-capable uploads, migrations through `0008_media_derivatives`, and `RECIPE_SUBMISSIONS_ENABLED=true` are all ready.
+Recipe writes become ready only when authentication, D1, private R2, Cloudflare Images, moderated derivative-capable uploads, migrations through `0009_recipe_publication_workflow`, and `RECIPE_SUBMISSIONS_ENABLED=true` are ready.
 
-The guarded **Enable Authentication** workflow rejects recipe activation when moderated media uploads are not also enabled. Deployment verification checks recipe readiness plus optimistic locking, requested changes, contributor revisions, and immutable snapshots.
+The guarded activation workflow rejects recipe activation without media uploads. Checked-in flags remain false.
 
-## Initial submission transaction
+## Initial submission
 
-The contributor editor first runs the canonical Worker draft validator. The protected submission API then requires:
+The protected submission endpoint requires:
 
-- a verified active session;
-- same-origin metadata;
-- purpose-bound `recipe-submit` signed CSRF;
+- verified active session;
+- same-origin request;
+- purpose-bound `recipe-submit` CSRF;
 - current session CSRF;
-- `application/json` under 100 KB;
-- per-account submission rate limiting;
-- canonical recipe validation.
+- body-size and rate limits;
+- canonical recipe validation;
+- valid D1 categories;
+- contributor-owned uploaded `recipe_hero`;
+- pending or approved media with complete mandatory privacy-safe derivatives;
+- media not already assigned to another recipe.
 
-The server verifies every category slug in D1. It also verifies that the attached asset:
+The recipe and normalized category/ingredient/direction rows are committed through one D1 batch. Successful submissions enter private `review`. Public D1 reads remain `published`-only.
 
-- belongs to the contributor;
-- is uploaded;
-- has purpose `recipe_hero`;
-- is pending or approved;
-- is not already attached to another recipe.
-
-The recipe row, category relations, ingredients, and directions are committed through one `D1Database.batch()` transaction. Ingredient and direction rows use bounded multi-row statements to stay below D1 parameter limits. A failed statement aborts the complete submission.
-
-A successful submission enters private `review`. Public D1 recipe queries expose only `published`.
-
-## Status meanings
+## Requested changes and contributor correction
 
 ```text
-review     waiting for an editor
-draft      changes requested; editable only by the owning contributor
-published  available through public D1 recipe queries
-archived   closed and not public
+review
+  → editor requests changes
+  → draft (owner-only correction state)
+  → contributor resubmits
+  → review
 ```
 
-`draft` in this workflow is not a public, collaborative, or general-purpose server draft. It is created only when an editor returns a submitted recipe to its owner with a required reason.
+Requested changes require editor/admin role, current optimistic revision, same-origin/CSRF protection, and a reason of at least ten characters.
 
-## Requested changes
+The owner-only editor loads current normalized content and eligible media. Resubmission requires ownership, `draft` status, expected revision, validation, valid categories, and owned ready media.
 
-Only `editor` and `admin` accounts can request changes. The protected editorial endpoint requires:
+A unique temporary `revision_write_token` guards every relational delete and insert. A stale browser cannot partially replace normalized content.
 
-- editor/admin role;
-- same-origin metadata;
-- `recipe-editorial` signed CSRF;
-- current session CSRF;
-- matching optimistic lock revision;
-- a reason of at least 10 characters.
+## Revision and snapshot model
 
-A successful request:
-
-1. transitions `review → draft`;
-2. increments the optimistic lock revision;
-3. stores the editor and reason;
-4. records `change_requested_at`;
-5. clears any stale revision write token;
-6. creates a trigger-backed editorial event.
-
-The contributor sees the reason at `/account/submissions` and can open `/account/submissions/:id/edit`. The edit query requires matching ownership and status `draft`. Another user, a recipe still in review, a published recipe, or an archived recipe cannot open the contributor editor.
-
-## Contributor revision editor
-
-The revision editor is separate from the browser-local new-recipe draft. It:
-
-- loads the current normalized recipe from D1;
-- displays the editor's requested-change reason;
-- restores current categories, ingredients, directions, timing, language, measurements, and media where eligible;
-- autosaves unsent changes under a recipe-specific browser key;
-- supports an eligible existing hero image or a new private upload;
-- displays lock/content revision information;
-- validates through the canonical Worker validator before resubmission.
-
-Rejected, quarantined, deleted, or otherwise unavailable media is not restored as eligible submission media. The contributor must attach a new uploaded `recipe_hero` before resubmitting.
-
-## Protected resubmission
-
-`POST /api/recipes/:id/resubmit` requires:
-
-- verified active contributor session;
-- matching recipe ownership;
-- status `draft`;
-- matching expected optimistic lock revision;
-- same-origin metadata;
-- purpose-bound `recipe-resubmit` signed CSRF;
-- current session CSRF;
-- JSON/body-size checks;
-- canonical recipe validation;
-- contributor rate limiting;
-- valid D1 categories;
-- owned pending or approved hero media not assigned to another recipe.
-
-Invalid content returns 422, unauthorized ownership/status returns 403, and stale revision conflicts return 409.
-
-## Atomic relational replacement
-
-Migration `0007_recipe_revisions` adds a temporary unique `revision_write_token`.
-
-Resubmission first performs a conditional update matching recipe ID, owner, `draft` status, and expected revision. A successful match acquires a unique token and updates the recipe into its next review/content state.
-
-Every later category, ingredient, direction, snapshot, and cleanup statement is guarded by the same token. If a stale tab fails to acquire it, guarded deletes and inserts become no-ops and the operation returns conflict rather than partially replacing content.
-
-A successful D1 batch:
-
-1. updates the recipe and moves `draft → review`;
-2. increments `revision`;
-3. increments `content_revision`;
-4. records `submitted_at` and `resubmitted_at`;
-5. backfills the previous content snapshot if it is not already present;
-6. replaces categories;
-7. replaces ingredients;
-8. replaces directions;
-9. writes the new immutable snapshot;
-10. clears the temporary write token.
-
-Any failed statement rolls back the complete batch.
-
-## Revision snapshots
-
-`recipe_revision_snapshots` stores:
-
-- recipe ID;
-- content revision number;
-- contributor/author ID;
-- source (`initial_submission` or `resubmission`);
-- validated draft JSON;
-- timestamp.
-
-Snapshot JSON is limited to 100 KB.
-
-The current normalized recipe row begins as content revision 1. During the first successful correction resubmission, the transaction writes the baseline content snapshot and the revised content snapshot together. Later resubmissions preserve previous snapshots and append the next content revision.
-
-The counters are intentionally separate:
-
-- `revision` changes on status or content transitions and prevents stale writes.
+- `revision` changes for content or workflow transitions and prevents stale writes.
 - `content_revision` changes only when contributor content is replaced.
+- `recipe_revision_snapshots` stores immutable validated JSON for initial submission and resubmission.
+- Snapshot data remains private.
 
-Snapshots are private and are not exposed by public recipe queries.
+## Media and publication gates
 
-## Separate media and recipe approval
-
-Media moderation and recipe review are separate decisions. A pending hero image with private derivatives may enter private recipe review, but publication requires:
+Immediate and scheduled publication require:
 
 ```text
-upload_status = uploaded
-moderation_status = approved
+status = review
+expected revision matches
+at least 2 ingredients
+at least 2 directions
+at least 1 category
+media upload_status = uploaded
+media moderation_status = approved
 current derivative policy = recipe-images-v1
 mandatory JPEG/WebP derivative matrix = ready
+source checksum matches the derivative job
 ```
 
-Media approval itself is blocked until the current-policy required matrix is ready. Editors inspect media at `/admin/media` and recipes at `/admin/recipes`. Neither private originals nor unapproved derivatives are exposed through public recipe reads.
+The final D1 update repeats these conditions. Concurrent content, status, media, checksum, or derivative changes return conflict instead of publishing stale content.
 
-## Publication and archival
+## Scheduled publication
 
-Publishing requires:
+Migration `0009_recipe_publication_workflow` adds schedule and audit fields.
 
-- status `review`;
-- matching optimistic revision;
-- at least two ingredients;
-- at least two directions;
-- at least one category;
-- attached uploaded and approved hero media;
-- a ready current-policy derivative job with every mandatory JPEG/WebP variant.
+A scheduled recipe remains private in `review`. An active schedule requires:
 
-The final conditional D1 update rechecks media approval, source checksum, derivative policy, and complete required-variant counts. A concurrent recipe revision, source replacement, derivative cleanup, or media moderation change returns conflict instead of publishing stale content.
+```text
+scheduled_publish_at is not null
+schedule_revision = revision
+```
 
-Archiving a review submission requires a clear editorial reason. Archived recipes are not public and cannot be edited by the contributor revision endpoint.
+Scheduling or replacing a schedule increments revision and stores the resulting revision in `schedule_revision`. Later contributor/editor changes invalidate the old schedule automatically through revision mismatch.
+
+Schedule input is normalized to UTC, at least five minutes in the future, and no more than one year ahead.
+
+### Due processor
+
+```text
+POST /api/recipes/scheduled/process
+```
+
+The processor requires editor/admin role, verified session, same-origin request, `recipe-schedule-process` CSRF, session CSRF, and a bounded limit of 1–25.
+
+It selects only due rows whose schedule revision still matches. Each recipe is promoted through an independent atomic D1 batch. Success clears schedule fields and increments revision. Re-running is idempotent.
+
+Automatic Cron Trigger execution is intentionally not configured.
+
+## Archive and restoration
+
+Archiving is allowed only from `review`, requires a clear reason, increments revision, records `archived_at`, and clears any active schedule.
+
+Restoration is:
+
+```text
+archived → review
+```
+
+It requires editor/admin role, expected revision, and a reason of at least five characters. Restoration clears schedule state and temporary relational write tokens, records `restored_at`, and returns the recipe to private review. It never republishes directly.
 
 ## Audit history
 
-Migration `0006_recipe_editorial` adds `recipe_editorial_events` and D1 triggers for:
-
-- initial review submission;
-- every real status transition.
-
-Events record actor, previous status, next status, reason, lock revision, and timestamp.
-
-Migration `0007_recipe_revisions` adds content revision/snapshot history without exposing private draft JSON publicly.
+- `recipe_editorial_events` records status transitions.
+- `recipe_revision_snapshots` records immutable contributor content revisions.
+- `recipe_publication_events` records schedule, cancellation, immediate publication, scheduled publication, archive, and restore actions with expected/resulting revisions.
 
 ## Private routes
 
-- `/account/submissions` — contributor-owned status, revisions, and change reasons
-- `/account/submissions/:id/edit` — owner-only requested-change editor
-- `/admin/recipes` — editor/admin review queue
-- `/admin/recipes/:id` — detailed private review and decisions
-- `/api/recipes/submissions` — protected first submission
-- `/api/recipes/:id/resubmit` — protected contributor replacement transaction
-- `/api/recipes/:id/editorial` — protected publish, request-changes, or archive transition
+- `/account/submissions`
+- `/account/submissions/:id/edit`
+- `/admin/recipes`
+- `/admin/recipes/:id`
+- `/api/recipes/submissions`
+- `/api/recipes/:id/resubmit`
+- `/api/recipes/:id/editorial`
+- `/api/recipes/scheduled/process`
 
-Middleware applies `private, no-store` to these routes. Robots rules disallow account, admin, API, and editor paths.
+Private pages and API responses use no-store/noindex protections where applicable.
 
-## Health and guarded workflow
+## Health capabilities
 
-`/api/health` exposes non-secret recipe readiness and these capability booleans:
+`/api/health` reports:
 
-- publication requires approved media and a complete current-policy mandatory derivative matrix;
-- privacy-safe derivative readiness and private-original denial;
-- optimistic locking;
-- requested changes;
+- publication requires approved media;
 - contributor revisions;
-- immutable snapshots.
-
-The guarded workflow verifies these capabilities when recipe submissions are intentionally requested. It refuses recipe activation without media uploads.
-
-## Rollback
-
-Running **Enable D1 and Deploy** restores checked-in false trusted-write flags while preserving D1 rows, snapshots, and audit history.
-
-To close only recipe submissions and revisions, rerun **Enable Authentication** with `enable_recipe_submissions=false`.
-
-This closes:
-
-- first submission;
 - requested changes;
-- contributor resubmission;
-- publication;
-- archival transitions.
+- immutable snapshots;
+- optimistic locking;
+- scheduled publishing;
+- guarded manual schedule processor;
+- archive restoration;
+- schedule revision guard;
+- scheduled media revalidation;
+- atomic scheduled promotion;
+- automatic schedule cron not configured.
 
-It preserves approved media delivery, published recipe reads, normalized rows, private snapshots, and audit history.
+Health output does not enable the feature or expose private content.
 
 ## Test matrix
 
-1. Anonymous first submission or resubmission returns 401.
-2. Invalid origin or CSRF returns 403.
-3. Invalid drafts and unknown categories create no partial rows.
-4. Another contributor's recipe or media cannot be edited or attached.
-5. Rejected, quarantined, deleted, or reused media cannot be attached.
-6. A valid first submission enters private `review` and remains absent from public search.
-7. Publication is blocked while media is pending.
-8. Request changes without a detailed reason returns 422.
-9. Valid request changes creates `review → draft` and one editorial event.
-10. Only the owning contributor can open the revision editor.
-11. A stale expected revision returns 409 and leaves normalized rows unchanged.
-12. Successful resubmission stores baseline/revised snapshots, increments content revision, and returns to `review`.
-13. Approved media and complete content allow publication.
-14. Concurrent media or recipe changes return 409 instead of publishing stale content.
-15. Archive without a clear reason returns 422.
-16. Disabling recipe submissions closes all recipe trusted writes without deleting stored history.
+1. Anonymous submission, resubmission, editorial action, or schedule processing returns 401.
+2. Non-editor scheduling/processing returns 403.
+3. Invalid origin or CSRF returns 403.
+4. Invalid recipe content creates no partial normalized rows.
+5. Another contributor's recipe or media cannot be edited or attached.
+6. Pending/rejected/quarantined media cannot be published or scheduled.
+7. A stale recipe revision returns 409.
+8. Successful correction resubmission stores immutable snapshots and returns to review.
+9. Invalid schedule date returns 422.
+10. Scheduling increments revision and sets matching `schedule_revision`.
+11. Later revision/status changes invalidate the old schedule.
+12. Cancel schedule clears schedule fields and increments revision.
+13. Two concurrent processors cannot publish the same revision twice.
+14. Due processing rechecks content, media approval, checksum, policy, and required derivatives.
+15. Archive clears a schedule and records audit history.
+16. Restore without a reason returns 422.
+17. Restore returns only to review.
+18. Disabling recipe submissions closes all recipe workflow writes without deleting rows, schedules, snapshots, events, or published reads.
 
-## Validation baseline
+## Rollback
 
-The last verified implementation head before documentation synchronization was:
+Redeploying checked-in false flags closes submission, resubmission, editorial decisions, scheduling, due processing, archive, and restore writes.
 
-```text
-7ea198c57407f44dc130eb6c6936b8fb255ae91a
-```
+Existing approved media and published recipes remain publicly readable. Pending rows, schedules, snapshots, normalized content, and audit events remain stored.
 
-GitHub Actions CI run `#290` passed project validation, operational scripts, Cloudflare type generation, and the Astro Worker build. Documentation commits may move the branch; always re-read PR `#1` before continuing.
+Migration `0009` is additive. Roll back application behavior rather than deleting applied schema history.
 
-## Current boundary
+## Current boundaries
 
-This phase does not support:
+- Published-recipe contributor change sets are not implemented.
+- Editor-authored content editing is not implemented.
+- Snapshot restore is not implemented.
+- Automatic Cron/queue execution is not configured.
+- Scheduled unpublish, embargo, recurring schedules, and user timezone preferences are not implemented.
 
-- collaborative editing;
-- contributor edits to published recipes;
-- editorial editing on behalf of contributors;
-- scheduled publishing;
-- archive restoration;
-- restoring a prior snapshot into an active draft;
-- merge/conflict resolution beyond optimistic rejection.
-
-The recommended next phase is privacy-safe image derivatives as specified in [`MEDIA_PIPELINE.md`](MEDIA_PIPELINE.md).
+See [`RECIPE_PUBLICATION_WORKFLOW.md`](RECIPE_PUBLICATION_WORKFLOW.md) for detailed scheduling and restoration design.
