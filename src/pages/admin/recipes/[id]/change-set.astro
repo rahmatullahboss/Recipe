@@ -1,0 +1,283 @@
+---
+import BaseLayout from "../../../../layouts/BaseLayout.astro";
+import {
+  CSRF_COOKIE,
+  createCsrfToken,
+  createRandomToken,
+  getCsrfCookieOptions,
+} from "../../../../lib/auth";
+import { getEditorPublishedRecipeChangeSetWorkspace } from "../../../../lib/editor-recipe-change-sets";
+import { listCategories } from "../../../../lib/db";
+import { markets } from "../../../../lib/market";
+import { supportedRecipeLanguages } from "../../../../lib/recipe-draft";
+import { getRecipeSubmissionReadiness } from "../../../../lib/recipe-submissions";
+
+const recipeId = Astro.params.id ?? "";
+if (!Astro.locals.user || !Astro.locals.session) {
+  return Astro.redirect(`/login?next=${encodeURIComponent(`/admin/recipes/${recipeId}/change-set`)}`, 302);
+}
+const editorial = Astro.locals.user.role === "editor" || Astro.locals.user.role === "admin";
+if (!editorial) Astro.response.status = 403;
+const validId = /^recipe_[0-9a-f-]{36}$/i.test(recipeId);
+const readiness = getRecipeSubmissionReadiness();
+const workspace = editorial && validId && readiness.database
+  ? await getEditorPublishedRecipeChangeSetWorkspace(recipeId)
+  : null;
+if (editorial && validId && readiness.database && !workspace) Astro.response.status = 404;
+
+const categories = await listCategories(100);
+const active = workspace?.active ?? null;
+const canCreate = Boolean(editorial && workspace && !active && readiness.ready);
+const canEdit = Boolean(editorial && active?.editorControlled && active.status === "draft" && readiness.ready);
+const canCancel = canEdit;
+let nonce = Astro.cookies.get(CSRF_COOKIE)?.value;
+if ((canCreate || canEdit || canCancel) && !nonce) {
+  nonce = createRandomToken(18);
+  Astro.cookies.set(CSRF_COOKIE, nonce, getCsrfCookieOptions(Astro.request));
+}
+const csrf = canCreate || canEdit || canCancel
+  ? await createCsrfToken("recipe-editor-authored-change-set", nonce)
+  : "";
+const sessionCsrf = Astro.locals.session.csrfToken;
+const draft = workspace?.draft;
+const languageLabels: Record<string, string> = {
+  en: "English",
+  fr: "French",
+  de: "German",
+  sv: "Swedish",
+  nl: "Dutch",
+};
+const originLabel: Record<string, string> = {
+  editor_current: "Current live recipe",
+  revision_snapshot: "Historical recipe revision",
+  approved_change_set_proposed: "Previously approved proposal",
+  approved_change_set_baseline: "Pre-approval historical baseline",
+};
+---
+
+<BaseLayout
+  title={workspace ? `Editorial Update: ${workspace.recipe.title} — Ozzyl Recipes` : "Editorial Recipe Update — Ozzyl Recipes"}
+  description="Create and edit private editorial proposals without changing live published recipe content."
+  robots="noindex,nofollow"
+>
+  <section class="section section--soft">
+    <div class="container">
+      <p class="eyebrow">Editorial private update</p>
+      <h1 class="section-title">{workspace ? workspace.recipe.title : "Editorial recipe update unavailable"}</h1>
+      {workspace && (
+        <p class="section-copy">
+          Live recipe revision {workspace.recipe.revision} · content revision {workspace.recipe.contentRevision}. Every editorial draft remains private until the existing atomic approval path succeeds.
+        </p>
+      )}
+      <div class="editor-actions editor-actions--compact">
+        <a class="recipe-tool-button" href="/admin/recipe-change-sets">Published update queue</a>
+        <a class="recipe-tool-button" href="/admin/recipes">Initial submission queue</a>
+        {workspace && <a class="recipe-tool-button" href={`/recipes/${workspace.recipe.slug}`}>View live recipe</a>}
+      </div>
+    </div>
+  </section>
+
+  <section
+    class="section"
+    data-editor-authored-change-set
+    data-api-url={workspace ? `/api/recipes/${workspace.recipe.id}/editor-change-set` : ""}
+    data-recipe-id={workspace?.recipe.id ?? ""}
+    data-change-set-id={active?.id ?? ""}
+    data-change-set-revision={active?.revision ?? ""}
+    data-storage-key={active?.editorControlled && active.status === "draft" ? `ozzyl:editor-change-set:${active.id}:v1` : ""}
+    data-csrf={csrf}
+    data-session-csrf={sessionCsrf}
+  >
+    <div class="container moderation-shell">
+      {!editorial ? (
+        <div class="auth-alert auth-alert--error"><strong>Editorial permission required.</strong></div>
+      ) : !readiness.database ? (
+        <div class="auth-alert"><strong>D1 recipe storage is unavailable.</strong></div>
+      ) : !workspace || !draft ? (
+        <div class="moderation-empty"><h2>Published recipe not found</h2><p>This recipe is unavailable for an editorial private update.</p></div>
+      ) : !active ? (
+        <div class="editor-shell">
+          <article class="editor-section">
+            <p class="eyebrow">New editor-authored proposal</p>
+            <h2>Start from the current live recipe</h2>
+            <p>The current normalized recipe becomes the immutable baseline and initial private proposal. The public recipe is not changed.</p>
+            <div class="editor-actions">
+              <button class="button" type="button" data-editor-change-set-action="create" disabled={!canCreate}>Start editorial proposal</button>
+            </div>
+            {!canCreate && <p class="auth-help">Editorial proposals remain closed until the complete guarded recipe pipeline is intentionally enabled.</p>}
+            <p class="moderation-result" data-change-set-result aria-live="polite"></p>
+          </article>
+
+          <aside class="editor-section">
+            <p class="eyebrow">Historical restore</p>
+            <h2>Restore into a new private proposal</h2>
+            <p>The selected historical content becomes the proposal while the current live recipe remains the baseline. Approval still requires exact current revisions.</p>
+            {workspace.history.length === 0 ? (
+              <div class="moderation-empty"><p>No historical snapshots are available for this recipe.</p></div>
+            ) : (
+              <div class="submission-list">
+                {workspace.history.map((item: any) => (
+                  <article class="submission-card">
+                    <p class="eyebrow">Content revision {item.contentRevision}</p>
+                    <h3>{item.label}</h3>
+                    <p class="submission-card__meta">Stored {new Date(item.createdAt).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })}</p>
+                    <button class="recipe-tool-button" type="button" data-restore-source={item.key} disabled={!canCreate}>Restore as private proposal</button>
+                  </article>
+                ))}
+              </div>
+            )}
+          </aside>
+        </div>
+      ) : active.status === "review" ? (
+        <div class="editor-section">
+          <p class="eyebrow">Awaiting independent review</p>
+          <h2>{draft.title}</h2>
+          <p>This editor-authored proposal is now locked for review. The live recipe remains unchanged.</p>
+          <dl class="moderation-meta">
+            <div><dt>Change-set revision</dt><dd>{active.revision}</dd></div>
+            <div><dt>Base recipe revision</dt><dd>{active.baseRecipeRevision}</dd></div>
+            <div><dt>Base content revision</dt><dd>{active.baseContentRevision}</dd></div>
+            <div><dt>Creator</dt><dd>{active.creatorName || active.creatorRole}</dd></div>
+          </dl>
+          <div class="editor-actions">
+            <a class="button" href={`/admin/recipe-change-sets/${active.id}`}>Open review comparison</a>
+            <a class="recipe-tool-button" href={`/recipes/${workspace.recipe.slug}`}>View live recipe</a>
+          </div>
+        </div>
+      ) : !active.editorControlled ? (
+        <div class="editor-section">
+          <p class="eyebrow">Contributor-controlled private update</p>
+          <h2>{draft.title}</h2>
+          <p>This active proposal was created through the contributor workflow. Editors cannot alter its draft content. Wait for submission or review it after it enters the queue.</p>
+          <dl class="moderation-meta">
+            <div><dt>Status</dt><dd>{active.status}</dd></div>
+            <div><dt>Revision</dt><dd>{active.revision}</dd></div>
+            <div><dt>Base recipe</dt><dd>{active.baseRecipeRevision}/{active.baseContentRevision}</dd></div>
+          </dl>
+          {active.status === "review" && <a class="button" href={`/admin/recipe-change-sets/${active.id}`}>Review proposal</a>}
+        </div>
+      ) : active.status === "changes_requested" ? (
+        <div class="editor-section">
+          <p class="eyebrow">Handed to recipe owner</p>
+          <h2>{draft.title}</h2>
+          <p>The contributor now controls this private proposal while responding to requested changes. Editorial editing remains locked until it is resubmitted.</p>
+          {active.editorialReason && <div class="auth-alert auth-alert--error"><strong>Requested changes</strong><p>{active.editorialReason}</p></div>}
+        </div>
+      ) : (
+        <div class="editor-shell">
+          <form class="editor-form" novalidate>
+            {active.origin && (
+              <div class="auth-alert">
+                <strong>Private origin: {originLabel[active.origin.sourceType] || active.origin.sourceType}</strong>
+                <p>
+                  Source content revision {active.origin.sourceContentRevision ?? "unknown"}.
+                  {active.origin.mediaFallbackApplied ? " Historical media was unavailable, so current eligible owner media was selected." : ""}
+                </p>
+              </div>
+            )}
+
+            <div class="editor-section">
+              <div class="editor-section__heading">
+                <div><h2>Recipe identity</h2><p>Edit only the private proposal. The current published row remains unchanged.</p></div>
+                <span class="editor-status" data-change-set-status>Editorial draft loaded.</span>
+              </div>
+              <div class="editor-grid">
+                <label class="editor-field editor-field--full"><span>Recipe title</span><input name="title" type="text" maxlength="120" value={draft.title} /></label>
+                <label class="editor-field editor-field--full"><span>Short summary</span><textarea name="summary" maxlength="240">{draft.summary}</textarea></label>
+                <label class="editor-field editor-field--full"><span>Full introduction</span><textarea name="description" maxlength="5000">{draft.description}</textarea></label>
+              </div>
+            </div>
+
+            <div class="editor-section">
+              <div class="editor-section__heading">
+                <div><h2>Owner media</h2><p>Editors may select only eligible media already owned by the recipe contributor. Uploading on the contributor's behalf is intentionally unavailable.</p></div>
+              </div>
+              <label class="editor-field editor-field--full">
+                <span>Proposed hero image</span>
+                <select name="mediaAssetId">
+                  <option value="">No media selected</option>
+                  {workspace.mediaOptions.map((item: any) => (
+                    <option
+                      value={item.id}
+                      selected={item.id === draft.mediaAssetId}
+                      data-preview-url={item.previewUrl}
+                      data-alt-text={item.altText || "Private proposed recipe image"}
+                      data-moderation-status={item.moderationStatus}
+                    >
+                      {item.moderationStatus} · {item.altText || item.id}
+                    </option>
+                  ))}
+                </select>
+                <small class="editor-help">A draft may be saved without media, but submission requires eligible owner media.</small>
+              </label>
+            </div>
+
+            <div class="editor-section">
+              <div class="editor-section__heading"><div><h2>Market and classification</h2><p>Confirm market, language, measurements, and taxonomy.</p></div></div>
+              <div class="editor-grid editor-grid--four">
+                <label class="editor-field"><span>Country or market</span><select name="countryCode">{markets.map((option) => <option value={option.code} selected={option.code === draft.countryCode}>{option.name}</option>)}</select></label>
+                <label class="editor-field"><span>Language</span><select name="languageCode">{supportedRecipeLanguages.map((code) => <option value={code} selected={code === draft.languageCode}>{languageLabels[code]}</option>)}</select></label>
+                <label class="editor-field"><span>Measurements</span><select name="measurementSystem"><option value="us" selected={draft.measurementSystem === "us"}>US customary</option><option value="metric" selected={draft.measurementSystem === "metric"}>Metric</option></select></label>
+                <label class="editor-field"><span>Difficulty</span><select name="difficulty"><option value="easy" selected={draft.difficulty === "easy"}>Easy</option><option value="medium" selected={draft.difficulty === "medium"}>Medium</option><option value="hard" selected={draft.difficulty === "hard"}>Hard</option></select></label>
+              </div>
+              <div class="recipe-control-group" style="margin-top:20px">
+                <span class="recipe-control-label">Categories and cuisines</span>
+                <div class="category-checks">{categories.map((category) => <label class="category-check"><input type="checkbox" name="categories" value={category.slug} checked={draft.categories.includes(category.slug)} /><span>{category.name}</span></label>)}</div>
+              </div>
+            </div>
+
+            <div class="editor-section">
+              <div class="editor-section__heading"><div><h2>Timing and yield</h2><p>Use realistic preparation and cooking times.</p></div></div>
+              <div class="editor-grid editor-grid--four">
+                <label class="editor-field"><span>Prep minutes</span><input name="prepMinutes" type="number" min="0" max="1440" step="1" value={draft.prepMinutes} /></label>
+                <label class="editor-field"><span>Cook minutes</span><input name="cookMinutes" type="number" min="0" max="4320" step="1" value={draft.cookMinutes} /></label>
+                <label class="editor-field"><span>Servings</span><input name="servings" type="number" min="1" max="200" step="1" value={draft.servings} /></label>
+              </div>
+            </div>
+
+            <div class="editor-section">
+              <div class="editor-section__heading"><div><h2>Ingredients</h2><p>The complete proposed list replaces live ingredients only after atomic approval.</p></div><button class="recipe-tool-button" type="button" data-add-ingredient>Add ingredient</button></div>
+              <div class="repeating-list" data-ingredient-rows>{draft.ingredients.map((ingredient) => <div class="ingredient-row" data-ingredient-row><input name="ingredient-item" type="text" maxlength="120" value={ingredient.item} aria-label="Ingredient name" /><input name="ingredient-amount" type="text" maxlength="32" value={ingredient.amount} aria-label="Ingredient amount" /><input name="ingredient-unit" type="text" maxlength="32" value={ingredient.unit} aria-label="Ingredient unit" /><input name="ingredient-note" type="text" maxlength="160" value={ingredient.note} aria-label="Ingredient note" /><button class="remove-row-button" type="button" data-remove-ingredient aria-label="Remove ingredient">×</button></div>)}</div>
+            </div>
+
+            <div class="editor-section">
+              <div class="editor-section__heading"><div><h2>Directions</h2><p>The complete direction list is promoted as one guarded operation.</p></div><button class="recipe-tool-button" type="button" data-add-step>Add step</button></div>
+              <div class="repeating-list" data-step-rows>{draft.steps.map((step) => <div class="step-row" data-step-row><textarea name="step-instruction" maxlength="1000" aria-label="Step instruction">{step.instruction}</textarea><input name="step-timer" type="number" min="0" max="1440" step="1" value={step.timerMinutes ?? ""} aria-label="Optional timer in minutes" /><button class="remove-row-button" type="button" data-remove-step aria-label="Remove step">×</button></div>)}</div>
+            </div>
+
+            <div class="validation-errors" data-validation-errors hidden></div>
+
+            <div class="editor-section">
+              <div class="editor-section__heading"><div><h2>Save or submit</h2><p>Submission enters the same independent review and atomic approval workflow used for contributor proposals.</p></div></div>
+              <label class="editor-field editor-field--full"><span>Editorial proposal note</span><textarea data-editor-note maxlength="1000" placeholder="Explain the reason and scope of this proposed update.">{active.contributorNote ?? ""}</textarea></label>
+              <div class="editor-actions">
+                <button class="recipe-tool-button" type="button" data-editor-change-set-action="save" disabled={!canEdit}>Save private draft</button>
+                <button class="button" type="button" data-editor-change-set-action="submit" disabled={!canEdit}>Submit for review</button>
+                <button class="recipe-tool-button" type="button" data-editor-change-set-action="cancel" disabled={!canCancel}>Cancel draft</button>
+                <button class="recipe-tool-button" type="button" data-discard-local>Discard local edits</button>
+              </div>
+              <p class="moderation-result" data-change-set-result aria-live="polite"></p>
+            </div>
+          </form>
+
+          <aside class="editor-preview" aria-label="Editor-authored recipe proposal preview">
+            <div class="editor-preview__image">
+              {workspace.selectedMedia ? <img data-preview-image src={workspace.selectedMedia.previewUrl} alt={workspace.selectedMedia.altText || "Private proposed recipe image"} /> : <img data-preview-image hidden alt="" />}
+              <span data-preview-image-placeholder hidden={Boolean(workspace.selectedMedia)}>Private owner-media preview</span>
+            </div>
+            <p class="eyebrow">Editor-authored private proposal</p>
+            <h2 data-preview-title>{draft.title}</h2>
+            <p data-preview-summary>{draft.summary}</p>
+            <p class="editor-preview__meta" data-preview-meta>{draft.countryCode} · {draft.prepMinutes + draft.cookMinutes} min · {draft.servings} servings · {draft.difficulty}</p>
+            <p class="conversion-note" data-preview-media-status>{workspace.selectedMedia ? `Selected owner media is ${workspace.selectedMedia.moderationStatus}.` : "No eligible owner media is selected."}</p>
+            <a class="recipe-tool-button" href={`/recipes/${workspace.recipe.slug}`}>Compare live recipe</a>
+          </aside>
+
+          <template data-ingredient-template><div class="ingredient-row" data-ingredient-row><input name="ingredient-item" type="text" maxlength="120" placeholder="Ingredient" aria-label="Ingredient name" /><input name="ingredient-amount" type="text" maxlength="32" placeholder="Amount" aria-label="Ingredient amount" /><input name="ingredient-unit" type="text" maxlength="32" placeholder="Unit" aria-label="Ingredient unit" /><input name="ingredient-note" type="text" maxlength="160" placeholder="Optional note" aria-label="Ingredient note" /><button class="remove-row-button" type="button" data-remove-ingredient aria-label="Remove ingredient">×</button></div></template>
+          <template data-step-template><div class="step-row" data-step-row><textarea name="step-instruction" maxlength="1000" placeholder="Describe this step clearly." aria-label="Step instruction"></textarea><input name="step-timer" type="number" min="0" max="1440" step="1" placeholder="Timer min" aria-label="Optional timer in minutes" /><button class="remove-row-button" type="button" data-remove-step aria-label="Remove step">×</button></div></template>
+        </div>
+      )}
+    </div>
+  </section>
+  <script src="/scripts/editor-authored-change-set.js" defer></script>
+</BaseLayout>
