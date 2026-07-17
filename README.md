@@ -10,8 +10,6 @@ For authoritative continuation context, read [`docs/PROJECT_HANDOFF.md`](docs/PR
 
 The checked-in public deployment remains D1-free. Public discovery, cooking, planning, browser-local saves, and the local recipe editor work without enabling trusted writes.
 
-The D1 configuration keeps all trusted-write surfaces closed:
-
 ```jsonc
 "AUTH_ENABLED": "false",
 "AUTH_REGISTRATION_ENABLED": "false",
@@ -19,25 +17,16 @@ The D1 configuration keeps all trusted-write surfaces closed:
 "RECIPE_SUBMISSIONS_ENABLED": "false"
 ```
 
-No production D1 activation, account provisioning, contributor upload, recipe creation, change-set operation, moderation decision, scheduling, publication, deployment, merge, or production change was performed by this branch work.
+No production D1 activation, account provisioning, contributor upload, recipe creation, change-set operation, historical restoration, moderation decision, scheduling, publication, deployment, merge, or production change was performed by this branch work.
 
 ## Implemented capabilities
 
-### International discovery
+### International discovery and kitchen tools
 
-- Cloudflare country detection with persistent manual market selection
+- Cloudflare country detection with persistent market selection
 - D1-free fallback catalogue covering ten initial markets
-- Market, category, and cuisine landing pages
-- Search/API filtering by keyword, ingredient, taxonomy, difficulty, total time, and sorting
-- Shared filtering behavior across fallback and future D1 reads
-- Recipe structured data, sitemap, robots, and real 404 responses
-
-### Cooking, planning, and offline tools
-
-- Serving scaling and approximate US/metric conversion
-- Print, copy-link, and original-measurement modes
-- Browser-local saved recipes, shopping list, and seven-day meal plan
-- Guided cooking with progress, timers, keyboard controls, and supported wake lock
+- Market/category/cuisine pages, search/API filters, Recipe structured data, sitemap, robots, and real 404s
+- Serving scaling, approximate US/metric conversion, print, copy link, saves, shopping list, meal plan, and guided cooking
 - PWA manifest, service worker, offline fallback, and private/API/media cache exclusions
 
 ### Guarded authentication
@@ -46,69 +35,75 @@ No production D1 activation, account provisioning, contributor upload, recipe cr
 - PBKDF2-HMAC-SHA256 with 600,000 iterations, unique salt, and server-only pepper
 - Verified-active-only Workers KV sessions and production `__Host-` cookie
 - D1 `auth_version` session revocation
-- Purpose-bound signed CSRF, same-origin checks, KV rate limits, Turnstile verification, lockout, verification token digests, consent, OAuth extension, and privacy-preserving audit events
-- Independent sign-in and public-registration flags
+- Purpose-bound CSRF, same-origin checks, rate limits, Turnstile, lockout, verification token digests, consent, OAuth extension, and privacy-preserving audit events
+- Independent sign-in, registration, media, and recipe-write flags
 
-### Guarded private media and privacy-safe derivatives
+### Private media and privacy-safe derivatives
 
 - One-time D1 upload intents and server-generated private R2 original keys
-- JPEG/PNG/WebP validation, 8 MiB limit, dimensions, 40 MP cap, signature/MIME/size/checksum checks
+- JPEG/PNG/WebP validation, 8 MiB limit, dimensions, 40 MP cap, signature/MIME/size/checksum checks, and SVG rejection
 - EXIF orientation parsing and normalized dimensions
 - `recipe-images-v1` widths at 320/640/960/1280 without upscaling
 - Required JPEG/WebP and optional exact-MIME AVIF through 960 px
-- Generated-byte metadata scanners
-- D1 generation leases, deterministic policy/checksum R2 keys, output checksums, and ETags
+- Generated metadata scanners, D1 generation leases, deterministic checksum/policy keys, output checksums, and ETags
 - Original objects never served by `/media`
 - Owner/editor derivative previews with `private, no-store`
 - Public delivery only for uploaded, approved parents with complete current derivatives
 - Guarded regeneration, media reservations, rejection/quarantine/deletion cleanup, and immutable public caching
 
-### Contributor submissions and requested changes
+### Submission, correction, publication, and restoration
 
 - Browser-autosaved new-recipe editor
-- Protected atomic first submission into private `review`
+- Atomic initial submission into private `review`
 - Public D1 reads restricted to `published`
-- Editor/admin publish, request-changes, and archive actions
+- Editor/admin publish, request-changes, scheduling, archive, and restore-to-review actions
 - Owner-only `review → draft → review` correction workflow
 - Separate optimistic `revision` and `content_revision`
-- Unique temporary `revision_write_token` guarding relational replacement
+- Unique temporary `revision_write_token` guarding normalized relational replacement
 - Immutable `recipe_revision_snapshots`
-- Final publication update rechecks approved media and current derivative readiness
+- Immediate and due scheduled publication through repeated content/media/derivative gates
+- Editor/admin manual due processor; no automatic Cron Trigger
+- `archived → review` restoration that never republishes directly
 
-### Scheduled publishing and archive restoration
+See [`docs/RECIPE_EDITORIAL.md`](docs/RECIPE_EDITORIAL.md) and [`docs/RECIPE_PUBLICATION_WORKFLOW.md`](docs/RECIPE_PUBLICATION_WORKFLOW.md).
 
-Migration `0009_recipe_publication_workflow` adds:
+### Private contributor updates to published recipes
 
-- Future UTC scheduling, replacement, and cancellation
-- Schedule ownership and `schedule_revision` optimistic guard
-- Immediate and due publication through the same final content/media gates
-- Editor/admin-only manual due processor at `POST /api/recipes/scheduled/process`
-- Deterministic due ordering and per-recipe atomic promotion
-- Archive timestamps and `archived → review` restoration
-- Separate `recipe_publication_events` audit history
-- Health diagnostics and fail-closed activation assertions
-- No automatic Cron Trigger
+Migration `0010_published_recipe_change_sets` provides:
 
-See [`docs/RECIPE_PUBLICATION_WORKFLOW.md`](docs/RECIPE_PUBLICATION_WORKFLOW.md).
-
-### Private updates to published recipes
-
-Migration `0010_published_recipe_change_sets` adds an isolated change-set workflow:
-
-- At most one active private change set per published recipe
-- Private baseline and proposed full recipe JSON
-- Exact base recipe/content revision guards
-- Contributor create, save, submit, withdraw, and requested-change loop
-- Active proposed-media reservation across recipes and change sets
-- Editor/admin baseline-versus-proposal review
-- Approval-time category, ownership, media, checksum, policy, and derivative revalidation
-- `revision_write_token` guarded replacement of live categories, ingredients, and directions
-- One atomic promotion that keeps status `published` and increments live recipe/content revisions
-- Immutable `recipe_change_set_events`
-- Public live rows unchanged during drafting and review
-- Private no-store contributor/editor pages and APIs
+- at most one active private change set per published recipe;
+- private baseline and proposed full recipe JSON;
+- exact base recipe/content revision guards;
+- contributor create, save, submit, withdraw, and requested-change loop;
+- active proposed-media reservation across recipes and change sets;
+- editor/admin baseline-versus-proposal review;
+- approval-time category, ownership, media, checksum, policy, and derivative revalidation;
+- `revision_write_token` guarded replacement of live categories, ingredients, and directions;
+- one atomic promotion that keeps status `published` and increments live recipe/content revisions;
+- immutable `recipe_change_set_events`;
+- unchanged public live rows during drafting and review.
 
 See [`docs/PUBLISHED_RECIPE_CHANGE_SETS.md`](docs/PUBLISHED_RECIPE_CHANGE_SETS.md).
+
+### Editor-authored proposals and historical restoration
+
+Migration `0011_editor_change_set_origins` adds immutable source metadata for editor-authored private proposals.
+
+Editors can:
+
+- start from the current normalized published recipe;
+- restore a `recipe_revision_snapshots` entry into a new private proposal;
+- restore the proposed or baseline JSON of an already approved change set;
+- edit only an origin-backed editor-controlled draft;
+- select only eligible media already owned by the recipe contributor;
+- save privately or submit into the same independent review queue;
+- cancel the private draft without changing the live recipe.
+
+The current live recipe always becomes the new baseline. Historical content becomes only proposed JSON. Invalid historical media falls back to current eligible owner media when possible and records that decision in immutable origin metadata. If no eligible media exists, the draft can be saved but not submitted.
+
+Contributor API and UI independently block writes to an editor-controlled `draft`. After a reviewer requests changes, the contributor controls the existing correction editor. Approval reuses the same atomic promotion implementation as contributor-authored proposals.
+
+See [`docs/EDITOR_RECIPE_CHANGE_SETS.md`](docs/EDITOR_RECIPE_CHANGE_SETS.md).
 
 ## Cloudflare architecture
 
@@ -127,8 +122,6 @@ See [`docs/PUBLISHED_RECIPE_CHANGE_SETS.md`](docs/PUBLISHED_RECIPE_CHANGE_SETS.m
 
 ## Authoritative D1 migrations
 
-Wrangler applies only:
-
 ```text
 migrations/d1/0001_initial/migration.sql
 migrations/d1/0002_seed/migration.sql
@@ -140,9 +133,10 @@ migrations/d1/0007_recipe_revisions/migration.sql
 migrations/d1/0008_media_derivatives/migration.sql
 migrations/d1/0009_recipe_publication_workflow/migration.sql
 migrations/d1/0010_published_recipe_change_sets/migration.sql
+migrations/d1/0011_editor_change_set_origins/migration.sql
 ```
 
-`wrangler.d1.jsonc` restricts migrations with:
+Wrangler applies only the nested sequence selected by:
 
 ```jsonc
 "migrations_pattern": "migrations/d1/*/migration.sql"
@@ -196,22 +190,24 @@ Keep all trusted-write flags false unless a deliberate controlled activation pro
 - `/admin/media`
 - `/admin/recipes`, `/admin/recipes/:id`
 - `/admin/recipe-change-sets`, `/admin/recipe-change-sets/:id`
+- `/admin/recipes/:id/change-set`
 - `/api/media/:id/moderate`
 - `/api/recipes/:id/editorial`
 - `POST /api/recipes/scheduled/process`
 - `POST /api/recipe-change-sets/:id/editorial`
+- `POST /api/recipes/:id/editor-change-set`
 - `/media/:key`
 
-Private account, contributor, admin, media-write, recipe-write, change-set, editorial, and schedule-processing routes receive no-store/noindex protections where appropriate.
+Private account, contributor, admin, media-write, recipe-write, change-set, historical-restore, editorial, and schedule-processing routes receive no-store/noindex protections where appropriate.
 
 ## Guarded workflows
 
-- CI validates the catalogue, ten migrations, security invariants, browser scripts, local migration chain, and both Worker builds.
+- CI validates the catalogue, eleven migrations, security invariants, browser scripts, fresh local migration chain, and both Worker builds.
 - D1-free deployment occurs from `main` only.
 - D1 provisioning requires exact `ENABLE_D1` confirmation while trusted writes remain disabled.
 - Authentication activation requires exact `ENABLE_AUTH` and independently controls registration, media, and recipe writes.
 - Recipe writes require media uploads.
-- Activation checks include published change-set isolation, base guards, media reservation, derivative revalidation, audit events, and atomic promotion.
+- Activation checks include scheduling, restoration, published-row isolation, base guards, media reservation, contributor and editor-authored proposals, historical restore, immutable origins, contributor draft-lock, derivative revalidation, audit events, and atomic promotion.
 - No automatic schedule processor is deployed by the checked-in code.
 
 ## Documentation
@@ -226,17 +222,17 @@ Private account, contributor, admin, media-write, recipe-write, change-set, edit
 - [`docs/RECIPE_EDITORIAL.md`](docs/RECIPE_EDITORIAL.md)
 - [`docs/RECIPE_PUBLICATION_WORKFLOW.md`](docs/RECIPE_PUBLICATION_WORKFLOW.md)
 - [`docs/PUBLISHED_RECIPE_CHANGE_SETS.md`](docs/PUBLISHED_RECIPE_CHANGE_SETS.md)
+- [`docs/EDITOR_RECIPE_CHANGE_SETS.md`](docs/EDITOR_RECIPE_CHANGE_SETS.md)
 
 ## Validation baseline
 
-Implementation head `e71f4b37a0af63f0e4804a7d3d911223b9a994c4` passed GitHub Actions CI run `#336`, including dependency installation, project validation, all ten local migrations, operational-script validation, D1-free Worker build, and D1 Worker build. Documentation commits may move the branch head; always recheck PR `#1` before continuing.
+Implementation head `c651f235dc40387e852ae0de1e865df746731fb7` passed GitHub Actions CI run `#356`, including locked dependency installation, security/change-set validation, all eleven fresh local D1 migrations, operational-script validation, D1-free Worker build, and D1 Worker build. Documentation commits may move the branch head; always recheck PR `#1` before continuing.
 
 ## Remaining phases
 
-1. Execute controlled non-production runtime acceptance for account, media, derivatives, submissions, requested corrections, schedules, archive/restore, published change sets, concurrency, and rollback.
-2. Add editor-authored private change sets and restoring historical snapshots into a new private change set.
-3. Add richer three-way conflict comparison or merge assistance without weakening optimistic rejection.
-4. Add optional Cloudflare Cron/queue scheduling only after manual processor acceptance and incident procedures.
-5. Approve legal, retention, moderation, incident, and verification-email operations.
-6. Add synchronized kitchen/community features and account lifecycle interfaces.
-7. Add nutrition/taxonomy/localization administration, search indexing, recommendations, analytics, and advertising controls.
+1. Execute controlled non-production runtime acceptance for account, media, derivatives, submissions, correction, scheduling, archive/restore, contributor/editor change sets, historical restoration, concurrency, and rollback.
+2. Add richer three-way conflict comparison or merge assistance without weakening optimistic rejection.
+3. Add optional Cloudflare Cron/queue scheduling only after manual processor acceptance and incident procedures.
+4. Approve legal, retention, moderation, incident, and verification-email operations.
+5. Add synchronized kitchen/community features and account lifecycle interfaces.
+6. Add nutrition/taxonomy/localization administration, search indexing, recommendations, analytics, and advertising controls.
