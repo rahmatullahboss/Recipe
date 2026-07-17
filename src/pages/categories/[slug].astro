@@ -1,0 +1,68 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import RecipeCard from "../../components/RecipeCard.astro";
+import { getCategoryBySlug, listRecipes } from "../../lib/db";
+import { resolveMarket } from "../../lib/market";
+
+const slug = Astro.params.slug?.trim().toLowerCase();
+const category = slug ? await getCategoryBySlug(slug) : null;
+
+if (!category) {
+  return Astro.redirect("/404", 302);
+}
+
+const market = resolveMarket(Astro.request, Astro.url);
+const recipes = await listRecipes({
+  category: category.slug,
+  country: market.code,
+  limit: 48,
+});
+const typeLabel = category.type === "cuisine"
+  ? "Cuisine"
+  : category.type === "meal"
+    ? "Meal"
+    : category.type === "method"
+      ? "Cooking method"
+      : "Recipe collection";
+---
+
+<BaseLayout
+  title={`${category.name} Recipes — Ozzyl Recipes`}
+  description={`Browse ${category.name.toLowerCase()} recipes prioritised for ${market.name}, with dependable ingredients and step-by-step directions.`}
+>
+  <section class="section category-hero">
+    <div class="container">
+      <div class="breadcrumbs"><a href="/">Home</a> / <a href="/categories">Categories</a> / {category.name}</div>
+      <p class="eyebrow">{typeLabel} · {market.name}</p>
+      <h1 class="section-title">{category.name} recipes</h1>
+      <p class="section-copy">Recipes for your selected market appear first, followed by relevant international favourites from this collection.</p>
+      <div class="filter-actions">
+        <a class="button" href={`/search?category=${encodeURIComponent(category.slug)}&country=${market.code}`}>Refine this collection</a>
+        <a class="button button--ghost" href="/categories">All categories</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <div class="results-heading">
+        <div>
+          <p class="eyebrow">{recipes.length} {recipes.length === 1 ? "recipe" : "recipes"}</p>
+          <h2>Explore {category.name}</h2>
+        </div>
+      </div>
+
+      {recipes.length > 0 ? (
+        <div class="recipe-grid">
+          {recipes.map((recipe) => <RecipeCard recipe={recipe} />)}
+        </div>
+      ) : (
+        <div class="empty-state">
+          <h2>This collection is being prepared</h2>
+          <p>More regional recipes will be added as the international catalogue expands.</p>
+          <a class="button" href="/search">Browse all recipes</a>
+        </div>
+      )}
+    </div>
+  </section>
+</BaseLayout>
