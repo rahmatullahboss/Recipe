@@ -1,6 +1,7 @@
 ---
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import { getRecipeBySlug } from "../../lib/db";
+import { getMarket } from "../../lib/market";
 
 const slug = Astro.params.slug;
 const recipe = slug ? await getRecipeBySlug(slug) : null;
@@ -10,17 +11,21 @@ if (!recipe) {
 }
 
 const totalMinutes = recipe.prep_minutes + recipe.cook_minutes;
+const recipeMarket = recipe.country_code === "GLOBAL" ? null : getMarket(recipe.country_code);
+const cuisine = recipe.categories.find((category) => category.type === "cuisine")?.name ?? recipeMarket?.name ?? "International";
 const schema = {
   "@context": "https://schema.org",
   "@type": "Recipe",
   name: recipe.title,
   description: recipe.summary,
   image: recipe.image_url ? [recipe.image_url] : undefined,
-  author: { "@type": "Person", name: recipe.author_name },
+  author: { "@type": "Organization", name: recipe.author_name },
   prepTime: `PT${recipe.prep_minutes}M`,
   cookTime: `PT${recipe.cook_minutes}M`,
   totalTime: `PT${totalMinutes}M`,
   recipeYield: `${recipe.servings} servings`,
+  recipeCuisine: cuisine,
+  inLanguage: "en",
   recipeIngredient: recipe.ingredients.map((ingredient) =>
     [ingredient.amount, ingredient.unit, ingredient.item, ingredient.note ? `(${ingredient.note})` : ""]
       .filter(Boolean)
@@ -51,6 +56,7 @@ const schema = {
     <div class="container">
       <div class="breadcrumbs"><a href="/">Home</a> / <a href="/search">Recipes</a> / {recipe.title}</div>
       <div class="chips">
+        {recipeMarket && <span class="chip">{recipeMarket.name}</span>}
         {recipe.categories.map((category) => (
           <a class="chip" href={`/search?q=${encodeURIComponent(category.name)}`}>{category.name}</a>
         ))}
@@ -63,6 +69,7 @@ const schema = {
         <span>{totalMinutes} minutes</span>
         <span>{recipe.servings} servings</span>
         <span>{recipe.difficulty}</span>
+        {recipeMarket && <span>{recipeMarket.measurementSystem === "us" ? "US measurements" : "Metric measurements"}</span>}
       </div>
     </div>
   </section>
