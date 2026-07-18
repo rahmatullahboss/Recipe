@@ -38,6 +38,9 @@ jobs:
       - name: Apply authoritative migrations locally
         run: npm run db:migrate:local
 
+      - name: Test three-way conflict and rebase audit safeguards
+        run: npm run test:conflicts
+
       - name: Generate Cloudflare types and build D1-free Astro Worker
         run: npm run build
 
