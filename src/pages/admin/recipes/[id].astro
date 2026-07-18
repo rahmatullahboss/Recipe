@@ -1,0 +1,147 @@
+---
+import BaseLayout from "../../../layouts/BaseLayout.astro";
+import { CSRF_COOKIE, createCsrfToken, createRandomToken, getCsrfCookieOptions } from "../../../lib/auth";
+import { listRecipePublicationEvents } from "../../../lib/recipe-publication";
+import { getEditorialRecipe, getRecipeSubmissionReadiness } from "../../../lib/recipe-submissions";
+
+const recipeId = Astro.params.id ?? "";
+if (!Astro.locals.user || !Astro.locals.session) {
+  return Astro.redirect(`/login?next=${encodeURIComponent(`/admin/recipes/${recipeId}`)}`, 302);
+}
+const editorial = Astro.locals.user.role === "editor" || Astro.locals.user.role === "admin";
+if (!editorial) Astro.response.status = 403;
+const readiness = getRecipeSubmissionReadiness();
+const [detail, publicationEvents] = editorial && readiness.database
+  ? await Promise.all([getEditorialRecipe(recipeId), listRecipePublicationEvents(recipeId, 50)])
+  : [null, []];
+if (editorial && readiness.database && !detail) Astro.response.status = 404;
+
+let csrfToken = "";
+if (editorial && detail) {
+  let nonce = Astro.cookies.get(CSRF_COOKIE)?.value;
+  if (!nonce) {
+    nonce = createRandomToken(18);
+    Astro.cookies.set(CSRF_COOKIE, nonce, getCsrfCookieOptions(Astro.request));
+  }
+  csrfToken = await createCsrfToken("recipe-editorial", nonce);
+}
+const sessionCsrf = Astro.locals.session.csrfToken;
+const recipe: any = detail?.recipe;
+const publishReady = recipe?.status === "review" && recipe?.media_upload_status === "uploaded" && recipe?.media_moderation_status === "approved";
+const activeSchedule = Boolean(recipe?.status === "review" && recipe?.scheduled_publish_at && recipe?.schedule_revision === recipe?.revision);
+const scheduleInputValue = activeSchedule ? String(recipe.scheduled_publish_at).replace(" ", "T").slice(0, 16) : "";
+---
+
+<BaseLayout title="Recipe Review — Ozzyl Recipes" description="Review a private contributor recipe before publication." robots="noindex,nofollow">
+  <section class="section section--soft">
+    <div class="container">
+      <p class="eyebrow">Editorial operations</p>
+      <h1 class="section-title">{recipe?.title || "Recipe review"}</h1>
+      {recipe && <p class="section-copy">Submitted by {recipe.author_name} · {recipe.country_code} · {recipe.language_code} · lock revision {recipe.revision} · content revision {recipe.content_revision ?? 1}</p>}
+    </div>
+  </section>
+
+  <section class="section">
+    <div
+      class="container editorial-review"
+      data-recipe-editorial
+      data-recipe-id={recipeId}
+      data-revision={recipe?.revision ?? ""}
+      data-csrf={csrfToken}
+      data-session-csrf={sessionCsrf}
+      data-active-schedule={activeSchedule ? "true" : "false"}
+    >
+      {!editorial ? (
+        <div class="auth-alert auth-alert--error"><strong>Editorial permission required.</strong></div>
+      ) : !readiness.database ? (
+        <div class="auth-alert"><strong>D1 editorial storage is unavailable.</strong></div>
+      ) : !detail || !recipe ? (
+        <div class="moderation-empty"><h2>Recipe submission not found</h2></div>
+      ) : (
+        <>
+          <div class="editorial-review__grid">
+            <article class="editor-section">
+              <p class="eyebrow">{activeSchedule ? "scheduled" : recipe.status}</p>
+              <h2>{recipe.title}</h2>
+              <p><strong>{recipe.summary}</strong></p>
+              {recipe.description && <p>{recipe.description}</p>}
+              <dl class="moderation-meta">
+                <div><dt>Prep</dt><dd>{recipe.prep_minutes} min</dd></div>
+                <div><dt>Cook</dt><dd>{recipe.cook_minutes} min</dd></div>
+                <div><dt>Servings</dt><dd>{recipe.servings}</dd></div>
+                <div><dt>Difficulty</dt><dd>{recipe.difficulty}</dd></div>
+                <div><dt>Measurements</dt><dd>{recipe.measurement_system}</dd></div>
+                <div><dt>Slug</dt><dd>{recipe.slug}</dd></div>
+                {activeSchedule && <div><dt>Scheduled UTC</dt><dd>{recipe.scheduled_publish_at}</dd></div>}
+                {recipe.archived_at && <div><dt>Last archived</dt><dd>{recipe.archived_at} UTC</dd></div>}
+              </dl>
+              <p><strong>Categories:</strong> {(detail.categories as any[]).map((category) => category.name).join(", ")}</p>
+            </article>
+
+            <aside class="editor-section">
+              {recipe.r2_key ? <img class="editorial-review__image" src={`/media/${recipe.r2_key}?preview=1`} alt={recipe.alt_text || "Private recipe image preview"} /> : <div class="moderation-empty">No hero image</div>}
+              <p><strong>Image status:</strong> {recipe.media_moderation_status || "missing"}</p>
+              <p>{recipe.alt_text || "No alternative text."}</p>
+              <a class="button button--ghost" href="/admin/media">Open media moderation</a>
+            </aside>
+          </div>
+
+          <div class="editorial-review__grid">
+            <section class="editor-section">
+              <h2>Ingredients</h2>
+              <ul>{(detail.ingredients as any[]).map((item) => <li>{[item.amount, item.unit, item.item].filter(Boolean).join(" ")}{item.note ? ` — ${item.note}` : ""}</li>)}</ul>
+            </section>
+            <section class="editor-section">
+              <h2>Directions</h2>
+              <ol>{(detail.steps as any[]).map((step) => <li>{step.instruction}{step.timer_seconds ? ` (${Math.round(step.timer_seconds / 60)} min)` : ""}</li>)}</ol>
+            </section>
+          </div>
+
+          {recipe.status === "review" && (
+            <section class="editor-section">
+              <h2>Editorial decision</h2>
+              <label class="editor-field"><span>Decision note</span><textarea data-editorial-reason maxlength="1000" placeholder="Required for requested changes or archive/restore. Optional publication note."></textarea></label>
+              <label class="editor-field"><span>Scheduled publication time (UTC)</span><input data-scheduled-publish-at type="datetime-local" value={scheduleInputValue} /><small class="editor-help">At least five minutes and no more than one year in the future.</small></label>
+              <div class="editor-actions">
+                <button class="button" type="button" data-editorial-action="publish" disabled={!publishReady}>Publish now</button>
+                <button class="button button--ghost" type="button" data-editorial-action="schedule" disabled={!publishReady}>{activeSchedule ? "Replace schedule" : "Schedule publication"}</button>
+                {activeSchedule && <button class="recipe-tool-button" type="button" data-editorial-action="cancel_schedule">Cancel schedule</button>}
+                <button class="recipe-tool-button" type="button" data-editorial-action="request_changes">Request contributor changes</button>
+                <button class="recipe-tool-button" type="button" data-editorial-action="archive">Archive submission</button>
+              </div>
+              {!publishReady && <p class="auth-help">Publishing and scheduling remain blocked until the attached hero image is uploaded, approved, and its mandatory derivatives are ready. The editor can still request revisions.</p>}
+              <p class="moderation-result" data-editorial-result aria-live="polite"></p>
+            </section>
+          )}
+
+          {recipe.status === "archived" && (
+            <section class="editor-section">
+              <h2>Restore archived recipe</h2>
+              <p>Restoration returns the recipe to private editorial review. It never republishes directly.</p>
+              <label class="editor-field"><span>Restoration reason</span><textarea data-editorial-reason maxlength="1000" placeholder="Explain why this archived recipe should return to review."></textarea></label>
+              <div class="editor-actions"><button class="button" type="button" data-editorial-action="restore">Restore to review</button></div>
+              <p class="moderation-result" data-editorial-result aria-live="polite"></p>
+            </section>
+          )}
+
+          <section class="editor-section">
+            <h2>Editorial history</h2>
+            <ol class="editorial-events">
+              {(detail.events as any[]).map((event) => <li><strong>{event.next_status}</strong> by {event.actor_name} · lock revision {event.revision}{event.reason ? ` — ${event.reason}` : ""}</li>)}
+            </ol>
+          </section>
+
+          <section class="editor-section">
+            <h2>Publication workflow history</h2>
+            {publicationEvents.length === 0 ? <p>No schedule or restoration events yet.</p> : (
+              <ol class="editorial-events">
+                {(publicationEvents as any[]).map((event) => <li><strong>{event.action}</strong> by {event.actor_name} · revision {event.expected_revision} → {event.resulting_revision}{event.scheduled_publish_at ? ` · ${event.scheduled_publish_at} UTC` : ""}{event.reason ? ` — ${event.reason}` : ""}</li>)}
+              </ol>
+            )}
+          </section>
+        </>
+      )}
+    </div>
+  </section>
+  <script src="/scripts/recipe-editorial.js" defer></script>
+</BaseLayout>

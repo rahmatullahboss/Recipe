@@ -1,0 +1,25 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+Astro.response.status = 404;
+Astro.response.statusText = "Not Found";
+---
+
+<BaseLayout
+  title="Page Not Found — Ozzyl Recipes"
+  description="The requested page could not be found."
+  robots="noindex,nofollow"
+>
+  <section class="section">
+    <div class="container">
+      <div class="empty-state">
+        <p class="eyebrow">404</p>
+        <h1 class="section-title">This recipe wandered off.</h1>
+        <p class="section-copy" style="margin-inline:auto">The page may have moved, been unpublished, or never existed.</p>
+        <div class="filter-actions" style="justify-content:center">
+          <a class="button" href="/search">Find another recipe</a>
+          <a class="button button--ghost" href="/">Back to homepage</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

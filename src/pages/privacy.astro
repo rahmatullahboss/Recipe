@@ -1,0 +1,20 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+
+<BaseLayout title="Privacy — Ozzyl Recipes" description="Privacy information for Ozzyl Recipes.">
+  <section class="section">
+    <div class="container" style="max-width:820px">
+      <p class="eyebrow">Privacy</p>
+      <h1 class="section-title">Privacy by design.</h1>
+      <p class="section-copy">The site uses Cloudflare's request-country metadata to prioritise recipes for a visitor's general market. This is country-level network information, not precise GPS location.</p>
+      <p class="section-copy">When a visitor manually changes the market, the site stores a first-party cookie named <code>preferred_country</code> for up to one year. The cookie contains only the selected two-letter country code and can be removed through browser settings.</p>
+      <p class="section-copy">Saved recipes, recipe text drafts, shopping-list items, weekly meal plans, cooking progress, and unsent contributor revisions are stored in the visitor's browser using local or session storage. Clearing site data removes them. An attached media asset identifier may also be retained locally so a signed-in contributor can restore its private preview.</p>
+      <p class="section-copy">The checked-in production configuration currently keeps D1 accounts, sign-in, registration, contributor media uploads, recipe submissions, and revision workflows disabled. When the guarded account deployment is intentionally activated, D1 stores account identity, password hashes, verification state, consent versions, session-revocation versions, and authentication audit events. Passwords and plaintext verification tokens are never stored.</p>
+      <p class="section-copy">When contributor media is activated, accepted JPEG, PNG, or WebP originals are stored privately in Cloudflare R2. D1 stores the owner, filename, type, dimensions, byte size, checksum, alternative text, upload state, and moderation history. Pending, rejected, and quarantined assets are not anonymously served; an owner may privately preview a pending upload, while editors and administrators may review moderation states.</p>
+      <p class="section-copy">When guarded recipe submissions are activated, D1 stores contributor recipe content, taxonomy links, ingredients, directions, workflow status, editorial reasons, lock and content revision numbers, timestamps, and immutable revision snapshots. Submitted and requested-change recipes remain private. Only recipes explicitly published by an editor or administrator are returned by public D1 recipe queries.</p>
+      <p class="section-copy">Authentication audit records use separately peppered fingerprints of network and browser signals instead of retaining raw IP addresses or complete user-agent strings. Operational retention, deletion, correction, appeal, and contact procedures must be approved before public registration or publishing is enabled.</p>
+      <p class="section-copy">Analytics, advertising, newsletters, public comments, ratings, cross-device synchronisation, and contributor editing of already published recipes remain separate future features. This notice must be reviewed again before any of those data flows are activated.</p>
+    </div>
+  </section>
+</BaseLayout>

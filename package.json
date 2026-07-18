@@ -1,0 +1,34 @@
+{
+  "name": "ozzyl-recipes",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler types --config wrangler.jsonc && astro dev",
+    "validate": "node --experimental-strip-types scripts/validate-project.mjs",
+    "test:conflicts": "node --experimental-transform-types --import ./scripts/register-cloudflare-test-loader.mjs scripts/test-recipe-change-set-conflicts.mjs",
+    "build": "wrangler types --config wrangler.jsonc && astro build",
+    "build:d1": "wrangler types --config wrangler.d1.jsonc && astro build",
+    "preview": "astro preview",
+    "deploy": "npm run validate && npm run build && wrangler deploy --config wrangler.jsonc",
+    "deploy:d1": "npm run validate && npm run build:d1 && wrangler deploy --config wrangler.d1.jsonc && npm run db:migrate:remote && wrangler deploy --config wrangler.d1.jsonc",
+    "types": "wrangler types --config wrangler.jsonc",
+    "types:d1": "wrangler types --config wrangler.d1.jsonc",
+    "db:migrations:list:local": "wrangler d1 migrations list DB --local --config wrangler.d1.jsonc",
+    "db:migrations:list:remote": "wrangler d1 migrations list DB --remote --config wrangler.d1.jsonc",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local --config wrangler.d1.jsonc",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote --config wrangler.d1.jsonc"
+  },
+  "dependencies": {
+    "@astrojs/cloudflare": "^14.1.3",
+    "astro": "^7.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "wrangler": "^4.45.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

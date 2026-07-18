@@ -1,0 +1,51 @@
+---
+import type { RecipeSummary } from "../lib/db";
+import { getMarket } from "../lib/market";
+import { mediaResponsiveSrcSet } from "../lib/media-policy";
+
+type Props = {
+  recipe: RecipeSummary;
+};
+
+const { recipe } = Astro.props;
+const totalMinutes = recipe.prep_minutes + recipe.cook_minutes;
+const recipeMarket = recipe.country_code === "GLOBAL" ? "International" : getMarket(recipe.country_code).name;
+const imageUrl = recipe.image_url ?? "/images/recipe-placeholder.svg";
+const imageSrcSet = mediaResponsiveSrcSet(imageUrl);
+---
+
+<article class="recipe-card">
+  <a class="recipe-card__image" href={`/recipes/${recipe.slug}`} aria-label={`View ${recipe.title}`}>
+    <img
+      src={imageUrl}
+      srcset={imageSrcSet}
+      sizes="(max-width: 720px) 100vw, (max-width: 1100px) 50vw, 33vw"
+      alt={recipe.title}
+      loading="lazy"
+      width="800"
+      height="600"
+    />
+    {recipe.is_featured === 1 && <span class="recipe-card__badge">Editor favourite</span>}
+  </a>
+  <button
+    class="save-button save-button--card"
+    type="button"
+    data-save-recipe={recipe.slug}
+    aria-pressed="false"
+    aria-label={`Save ${recipe.title}`}
+    title={`Save ${recipe.title}`}
+  >
+    <span aria-hidden="true">♡</span>
+    <span class="sr-only" data-save-label>Save</span>
+  </button>
+  <div class="recipe-card__body">
+    <span class="recipe-market">{recipeMarket}</span>
+    <h3><a href={`/recipes/${recipe.slug}`}>{recipe.title}</a></h3>
+    <p>{recipe.summary}</p>
+    <div class="recipe-card__meta">
+      <span>{totalMinutes} min</span>
+      <span>{recipe.difficulty}</span>
+      <span class="rating">★ {recipe.average_rating.toFixed(1)} ({recipe.rating_count})</span>
+    </div>
+  </div>
+</article>

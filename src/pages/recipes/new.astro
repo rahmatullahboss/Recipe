@@ -1,0 +1,299 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import {
+  CSRF_COOKIE,
+  createCsrfToken,
+  createRandomToken,
+  getCsrfCookieOptions,
+} from "../../lib/auth";
+import { listCategories } from "../../lib/db";
+import { markets, resolveMarket } from "../../lib/market";
+import { getMediaReadiness } from "../../lib/media";
+import { getMediaRuntimeStatus } from "../../lib/media-runtime";
+import { supportedRecipeLanguages } from "../../lib/recipe-draft";
+import { getRecipeSubmissionReadiness } from "../../lib/recipe-submissions";
+
+const market = resolveMarket(Astro.request, Astro.url);
+const categories = await listCategories(100);
+const mediaReadiness = getMediaReadiness();
+const mediaRuntime = getMediaRuntimeStatus();
+const submissionReadiness = getRecipeSubmissionReadiness();
+const hasVerifiedSession = Boolean(Astro.locals.authReady && Astro.locals.user && Astro.locals.session);
+const canUploadMedia = Boolean(hasVerifiedSession && mediaRuntime.uploadsEnabled && mediaReadiness.ready);
+const canSubmitRecipe = Boolean(hasVerifiedSession && submissionReadiness.ready);
+
+let csrfNonce = Astro.cookies.get(CSRF_COOKIE)?.value;
+if ((canUploadMedia || canSubmitRecipe) && !csrfNonce) {
+  csrfNonce = createRandomToken(18);
+  Astro.cookies.set(CSRF_COOKIE, csrfNonce, getCsrfCookieOptions(Astro.request));
+}
+const mediaCsrfToken = canUploadMedia ? await createCsrfToken("media-intent", csrfNonce) : "";
+const submissionCsrfToken = canSubmitRecipe ? await createCsrfToken("recipe-submit", csrfNonce) : "";
+const sessionCsrf = Astro.locals.session?.csrfToken ?? "";
+const languageLabels: Record<string, string> = {
+  en: "English",
+  fr: "French",
+  de: "German",
+  sv: "Swedish",
+  nl: "Dutch",
+};
+---
+
+<BaseLayout
+  title="Create a Recipe Draft — Ozzyl Recipes"
+  description="Create, validate, attach moderated media, and submit an international recipe for review."
+  robots="noindex,nofollow"
+>
+  <section class="section section--soft">
+    <div class="container">
+      <p class="eyebrow">Contributor workspace</p>
+      <h1 class="section-title">Create a regional recipe draft</h1>
+      <p class="section-copy">Recipe text autosaves in this browser. Guarded contributors can upload a private hero image and submit a complete draft to the D1 editorial queue; nothing becomes public before separate media and recipe approval.</p>
+    </div>
+  </section>
+
+  <section class="section" data-recipe-editor>
+    <div class="container editor-shell">
+      <form class="editor-form" novalidate>
+        <input name="mediaAssetId" type="hidden" value="" data-media-asset-id />
+
+        <div class="editor-section">
+          <div class="editor-section__heading">
+            <div>
+              <h2>Recipe identity</h2>
+              <p>Write clear, original copy suitable for an international audience.</p>
+            </div>
+            <span class="editor-status" data-draft-status>Preparing local draft…</span>
+          </div>
+
+          <div class="editor-grid">
+            <label class="editor-field editor-field--full">
+              <span>Recipe title</span>
+              <input name="title" type="text" maxlength="120" placeholder="Example: French-style roast chicken" autocomplete="off" />
+              <small class="editor-help">5–120 characters.</small>
+            </label>
+
+            <label class="editor-field editor-field--full">
+              <span>Short summary</span>
+              <textarea name="summary" maxlength="240" placeholder="Describe the result, flavour, and why someone should cook it."></textarea>
+              <small class="editor-help">20–240 characters; used on recipe cards and search results.</small>
+            </label>
+
+            <label class="editor-field editor-field--full">
+              <span>Full introduction</span>
+              <textarea name="description" maxlength="5000" placeholder="Add useful context, technique notes, serving ideas, and regional background."></textarea>
+            </label>
+          </div>
+        </div>
+
+        <div class="editor-section" data-media-uploader data-media-enabled={canUploadMedia ? "true" : "false"}>
+          <div class="editor-section__heading">
+            <div>
+              <h2>Recipe image</h2>
+              <p>Images are validated by file signature, dimensions, byte size, and checksum before private R2 storage.</p>
+            </div>
+            <span class="editor-status" data-media-status aria-live="polite">No image attached.</span>
+          </div>
+
+          {canUploadMedia ? (
+            <div class="media-upload-grid">
+              <input type="hidden" value={mediaCsrfToken} data-media-csrf />
+              <input type="hidden" value={sessionCsrf} data-media-session-csrf />
+              <label class="editor-field editor-field--full">
+                <span>JPEG, PNG, or WebP</span>
+                <input data-media-file type="file" accept="image/jpeg,image/png,image/webp" />
+                <small class="editor-help">Maximum 8 MB. Minimum 320 × 240 pixels. SVG files are not accepted.</small>
+              </label>
+              <label class="editor-field editor-field--full">
+                <span>Alternative text</span>
+                <input data-media-alt type="text" maxlength="240" placeholder="Describe the visible food, plating, and important context." />
+                <small class="editor-help">Required for recipe images and reviewed with the image.</small>
+              </label>
+              <div class="editor-actions editor-actions--compact">
+                <button class="button" type="button" data-upload-media>Upload for review</button>
+                <button class="recipe-tool-button" type="button" data-clear-media>Detach image</button>
+              </div>
+            </div>
+          ) : (
+            <div class="validation-errors media-upload-disabled" role="status">
+              {Astro.locals.user ? (
+                <p>Media uploads remain safely disabled until authentication, D1, R2, the media migration, and the explicit <code>MEDIA_UPLOADS_ENABLED</code> activation flag are ready.</p>
+              ) : (
+                <p><a href="/login?next=%2Frecipes%2Fnew">Sign in with a verified account</a> after contributor media is activated. The text draft still works without an account.</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div class="editor-section">
+          <div class="editor-section__heading">
+            <div>
+              <h2>Market and classification</h2>
+              <p>Country and cuisine metadata control personalisation and international discovery.</p>
+            </div>
+          </div>
+
+          <div class="editor-grid editor-grid--four">
+            <label class="editor-field">
+              <span>Country or market</span>
+              <select name="countryCode">
+                {markets.map((option) => (
+                  <option value={option.code} selected={option.code === market.code}>{option.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <label class="editor-field">
+              <span>Language</span>
+              <select name="languageCode">
+                {supportedRecipeLanguages.map((code) => (
+                  <option value={code} selected={code === "en"}>{languageLabels[code]}</option>
+                ))}
+              </select>
+            </label>
+
+            <label class="editor-field">
+              <span>Measurements</span>
+              <select name="measurementSystem">
+                <option value="us" selected={market.measurementSystem === "us"}>US customary</option>
+                <option value="metric" selected={market.measurementSystem === "metric"}>Metric</option>
+              </select>
+            </label>
+
+            <label class="editor-field">
+              <span>Difficulty</span>
+              <select name="difficulty">
+                <option value="easy">Easy</option>
+                <option value="medium">Medium</option>
+                <option value="hard">Hard</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="recipe-control-group" style="margin-top:20px">
+            <span class="recipe-control-label">Categories and cuisines</span>
+            <div class="category-checks">
+              {categories.map((category) => (
+                <label class="category-check">
+                  <input type="checkbox" name="categories" value={category.slug} />
+                  <span>{category.name}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div class="editor-section">
+          <div class="editor-section__heading">
+            <div>
+              <h2>Timing and yield</h2>
+              <p>Use realistic active and cooking times.</p>
+            </div>
+          </div>
+
+          <div class="editor-grid editor-grid--four">
+            <label class="editor-field">
+              <span>Prep minutes</span>
+              <input name="prepMinutes" type="number" min="0" max="1440" step="1" value="15" />
+            </label>
+            <label class="editor-field">
+              <span>Cook minutes</span>
+              <input name="cookMinutes" type="number" min="0" max="4320" step="1" value="30" />
+            </label>
+            <label class="editor-field">
+              <span>Servings</span>
+              <input name="servings" type="number" min="1" max="200" step="1" value="4" />
+            </label>
+          </div>
+        </div>
+
+        <div class="editor-section">
+          <div class="editor-section__heading">
+            <div>
+              <h2>Ingredients</h2>
+              <p>Add a clear item, amount, unit, and optional preparation note.</p>
+            </div>
+            <button class="recipe-tool-button" type="button" data-add-ingredient>Add ingredient</button>
+          </div>
+          <div class="repeating-list" data-ingredient-rows></div>
+        </div>
+
+        <div class="editor-section">
+          <div class="editor-section__heading">
+            <div>
+              <h2>Directions</h2>
+              <p>Write complete steps in the order they should be performed.</p>
+            </div>
+            <button class="recipe-tool-button" type="button" data-add-step>Add step</button>
+          </div>
+          <div class="repeating-list" data-step-rows></div>
+        </div>
+
+        <div class="editor-section" data-recipe-submission data-submission-enabled={canSubmitRecipe ? "true" : "false"}>
+          <div class="editor-section__heading">
+            <div>
+              <h2>Editorial submission</h2>
+              <p>The recipe, ingredients, directions, taxonomy, contributor ownership, and attached image are committed together in one D1 transaction.</p>
+            </div>
+            <span class="editor-status" data-submission-status aria-live="polite">Not submitted.</span>
+          </div>
+          {canSubmitRecipe ? (
+            <>
+              <input type="hidden" value={submissionCsrfToken} data-submission-csrf />
+              <input type="hidden" value={sessionCsrf} data-submission-session-csrf />
+              <div class="editor-actions editor-actions--compact">
+                <button class="button" type="button" data-submit-recipe>Submit for editorial review</button>
+                <a class="recipe-tool-button" href="/account/submissions">View your submissions</a>
+              </div>
+              <p class="editor-help">An uploaded hero image is required. A pending image may enter the queue, but publication remains blocked until media approval.</p>
+            </>
+          ) : (
+            <div class="validation-errors media-upload-disabled" role="status">
+              <p>Server submission remains disabled until verified authentication, D1, R2, media uploads, migration 0006, and <code>RECIPE_SUBMISSIONS_ENABLED=true</code> are all ready. Local validation and JSON export remain available.</p>
+            </div>
+          )}
+        </div>
+
+        <div class="validation-errors" data-validation-errors hidden></div>
+
+        <div class="editor-actions">
+          <button class="button" type="submit" data-validate-draft>Validate draft</button>
+          <button class="recipe-tool-button" type="button" data-export-draft>Export JSON</button>
+          <button class="recipe-tool-button" type="button" data-clear-draft>Clear local draft</button>
+        </div>
+      </form>
+
+      <aside class="editor-preview" aria-label="Recipe draft preview">
+        <div class="editor-preview__image" data-preview-image-wrap>
+          <img data-preview-image hidden alt="" />
+          <span data-preview-image-placeholder>Recipe photo preview</span>
+        </div>
+        <p class="eyebrow">Live draft preview</p>
+        <h2 data-preview-title>Untitled regional recipe</h2>
+        <p data-preview-summary>Your recipe summary will appear here.</p>
+        <p class="editor-preview__meta" data-preview-meta>{market.code} · 45 min · 4 servings · easy</p>
+        <p class="conversion-note" data-preview-media-status>No image attached. Uploaded images remain private while moderation is pending.</p>
+      </aside>
+
+      <template data-ingredient-template>
+        <div class="ingredient-row" data-ingredient-row>
+          <input name="ingredient-item" type="text" maxlength="120" placeholder="Ingredient" aria-label="Ingredient name" />
+          <input name="ingredient-amount" type="text" maxlength="32" placeholder="Amount" aria-label="Ingredient amount" />
+          <input name="ingredient-unit" type="text" maxlength="32" placeholder="Unit" aria-label="Ingredient unit" />
+          <input name="ingredient-note" type="text" maxlength="160" placeholder="Optional note" aria-label="Ingredient note" />
+          <button class="remove-row-button" type="button" data-remove-ingredient aria-label="Remove ingredient">×</button>
+        </div>
+      </template>
+
+      <template data-step-template>
+        <div class="step-row" data-step-row>
+          <textarea name="step-instruction" maxlength="1000" placeholder="Describe this step clearly." aria-label="Step instruction"></textarea>
+          <input name="step-timer" type="number" min="0" max="1440" step="1" placeholder="Timer min" aria-label="Optional timer in minutes" />
+          <button class="remove-row-button" type="button" data-remove-step aria-label="Remove step">×</button>
+        </div>
+      </template>
+    </div>
+  </section>
+
+  <script src="/scripts/recipe-editor.js" defer></script>
+</BaseLayout>

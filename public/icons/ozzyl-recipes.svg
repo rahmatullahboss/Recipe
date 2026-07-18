@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Ozzyl Recipes</title>
+  <rect width="512" height="512" rx="112" fill="#fffdf8"/>
+  <circle cx="256" cy="256" r="176" fill="#d94f2b"/>
+  <path d="M177 169c-31 0-56 25-56 56 0 20 10 37 25 47v71c0 20 16 36 36 36h148c20 0 36-16 36-36v-71c15-10 25-27 25-47 0-31-25-56-56-56-14 0-27 5-37 14-10-28-36-48-67-48s-57 20-67 48c-10-9-23-14-37-14Z" fill="#fffdf8"/>
+  <path d="M184 301h144M184 337h144" stroke="#d94f2b" stroke-width="18" stroke-linecap="round"/>
+</svg>

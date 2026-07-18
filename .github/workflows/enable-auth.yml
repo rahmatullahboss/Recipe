@@ -1,0 +1,238 @@
+name: Enable Authentication
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type ENABLE_AUTH to migrate and enable protected accounts
+        required: true
+        type: string
+      enable_registration:
+        description: Open public registration after verification email delivery is configured
+        required: true
+        default: false
+        type: boolean
+      enable_media_uploads:
+        description: Open moderated contributor image uploads after the R2 review workflow is tested
+        required: true
+        default: false
+        type: boolean
+      enable_recipe_submissions:
+        description: Open D1 recipe submissions, revisions, private published updates, scheduling, and guarded publishing after media review is tested
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: cloudflare-auth-production
+  cancel-in-progress: false
+
+jobs:
+  enable-auth:
+    if: ${{ inputs.confirmation == 'ENABLE_AUTH' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Verify deployment and authentication configuration
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          AUTH_PASSWORD_PEPPER: ${{ secrets.AUTH_PASSWORD_PEPPER }}
+          AUTH_FINGERPRINT_PEPPER: ${{ secrets.AUTH_FINGERPRINT_PEPPER }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          AUTH_EMAIL_WEBHOOK_TOKEN: ${{ secrets.AUTH_EMAIL_WEBHOOK_TOKEN }}
+          TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
+          AUTH_EMAIL_WEBHOOK_URL: ${{ vars.AUTH_EMAIL_WEBHOOK_URL }}
+          ENABLE_REGISTRATION: ${{ inputs.enable_registration }}
+          ENABLE_MEDIA_UPLOADS: ${{ inputs.enable_media_uploads }}
+          ENABLE_RECIPE_SUBMISSIONS: ${{ inputs.enable_recipe_submissions }}
+        run: |
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "CLOUDFLARE_ACCOUNT_ID is not configured"; exit 1; }
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN is not configured"; exit 1; }
+          test -n "$AUTH_PASSWORD_PEPPER" || { echo "AUTH_PASSWORD_PEPPER is not configured"; exit 1; }
+          test -n "$AUTH_FINGERPRINT_PEPPER" || { echo "AUTH_FINGERPRINT_PEPPER is not configured"; exit 1; }
+          test -n "$TURNSTILE_SECRET_KEY" || { echo "TURNSTILE_SECRET_KEY is not configured"; exit 1; }
+          test -n "$TURNSTILE_SITE_KEY" || { echo "TURNSTILE_SITE_KEY environment variable is not configured"; exit 1; }
+          if [ "$ENABLE_REGISTRATION" = "true" ]; then
+            test -n "$AUTH_EMAIL_WEBHOOK_URL" || { echo "AUTH_EMAIL_WEBHOOK_URL environment variable is not configured"; exit 1; }
+            test -n "$AUTH_EMAIL_WEBHOOK_TOKEN" || { echo "AUTH_EMAIL_WEBHOOK_TOKEN is not configured"; exit 1; }
+          fi
+          if [ "$ENABLE_RECIPE_SUBMISSIONS" = "true" ] && [ "$ENABLE_MEDIA_UPLOADS" != "true" ]; then
+            echo "Recipe submissions require enable_media_uploads=true"
+            exit 1
+          fi
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate project, account, media, and recipe migrations
+        run: npm run validate
+
+      - name: Build D1 Worker
+        run: npm run build:d1
+
+      - name: Prepare ephemeral account config and encrypted secrets input
+        env:
+          AUTH_PASSWORD_PEPPER: ${{ secrets.AUTH_PASSWORD_PEPPER }}
+          AUTH_FINGERPRINT_PEPPER: ${{ secrets.AUTH_FINGERPRINT_PEPPER }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          AUTH_EMAIL_WEBHOOK_TOKEN: ${{ secrets.AUTH_EMAIL_WEBHOOK_TOKEN }}
+          TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
+          AUTH_EMAIL_WEBHOOK_URL: ${{ vars.AUTH_EMAIL_WEBHOOK_URL }}
+          AUTH_FROM_EMAIL: ${{ vars.AUTH_FROM_EMAIL }}
+          ENABLE_REGISTRATION: ${{ inputs.enable_registration }}
+          ENABLE_MEDIA_UPLOADS: ${{ inputs.enable_media_uploads }}
+          ENABLE_RECIPE_SUBMISSIONS: ${{ inputs.enable_recipe_submissions }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+
+          const registrationEnabled = process.env.ENABLE_REGISTRATION === "true";
+          const mediaUploadsEnabled = process.env.ENABLE_MEDIA_UPLOADS === "true";
+          const recipeSubmissionsEnabled = process.env.ENABLE_RECIPE_SUBMISSIONS === "true";
+          if (recipeSubmissionsEnabled && !mediaUploadsEnabled) {
+            throw new Error("Recipe submissions require moderated media uploads.");
+          }
+
+          const config = JSON.parse(fs.readFileSync("wrangler.d1.jsonc", "utf8"));
+          config.vars = {
+            ...(config.vars ?? {}),
+            AUTH_ENABLED: "true",
+            AUTH_REGISTRATION_ENABLED: String(registrationEnabled),
+            MEDIA_UPLOADS_ENABLED: String(mediaUploadsEnabled),
+            RECIPE_SUBMISSIONS_ENABLED: String(recipeSubmissionsEnabled),
+            TURNSTILE_SITE_KEY: process.env.TURNSTILE_SITE_KEY,
+          };
+
+          if (registrationEnabled) {
+            config.vars.AUTH_EMAIL_WEBHOOK_URL = process.env.AUTH_EMAIL_WEBHOOK_URL;
+            if (process.env.AUTH_FROM_EMAIL) config.vars.AUTH_FROM_EMAIL = process.env.AUTH_FROM_EMAIL;
+          } else {
+            delete config.vars.AUTH_EMAIL_WEBHOOK_URL;
+            delete config.vars.AUTH_FROM_EMAIL;
+          }
+
+          const secrets = {
+            AUTH_PASSWORD_PEPPER: process.env.AUTH_PASSWORD_PEPPER,
+            AUTH_FINGERPRINT_PEPPER: process.env.AUTH_FINGERPRINT_PEPPER,
+            TURNSTILE_SECRET_KEY: process.env.TURNSTILE_SECRET_KEY,
+          };
+          if (registrationEnabled) secrets.AUTH_EMAIL_WEBHOOK_TOKEN = process.env.AUTH_EMAIL_WEBHOOK_TOKEN;
+
+          fs.writeFileSync(".wrangler.auth.json", JSON.stringify(config, null, 2), { mode: 0o600 });
+          fs.writeFileSync(".auth-secrets.json", JSON.stringify(secrets), { mode: 0o600 });
+          NODE
+
+      - name: Provision D1 Worker with accounts and trusted writes disabled
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --config wrangler.d1.jsonc
+
+      - name: Apply pending D1 migrations
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: d1 migrations apply DB --remote --config wrangler.d1.jsonc
+
+      - name: Deploy account-enabled Worker
+        id: deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          command: deploy --config .wrangler.auth.json --secrets-file .auth-secrets.json
+
+      - name: Verify account, media, and recipe deployment
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment-url }}
+          EXPECT_REGISTRATION: ${{ inputs.enable_registration }}
+          EXPECT_MEDIA_UPLOADS: ${{ inputs.enable_media_uploads }}
+          EXPECT_RECIPE_SUBMISSIONS: ${{ inputs.enable_recipe_submissions }}
+        run: |
+          test -n "$DEPLOYMENT_URL" || { echo "Wrangler did not return a deployment URL"; exit 1; }
+          HEALTH_JSON=$(curl --fail --silent --show-error --retry 5 --retry-delay 3 "$DEPLOYMENT_URL/api/health")
+          echo "$HEALTH_JSON"
+          HEALTH_JSON="$HEALTH_JSON" node --input-type=module -e '
+            const health = JSON.parse(process.env.HEALTH_JSON ?? "{}");
+            const expectRegistration = process.env.EXPECT_REGISTRATION === "true";
+            const expectMediaUploads = process.env.EXPECT_MEDIA_UPLOADS === "true";
+            const expectRecipeSubmissions = process.env.EXPECT_RECIPE_SUBMISSIONS === "true";
+            const failures = [];
+            if (health.ok !== true) failures.push("health.ok is not true");
+            if (health.dataMode !== "d1") failures.push(`unexpected dataMode: ${health.dataMode}`);
+            if (health.authentication?.enabled !== true) failures.push("authentication is not enabled");
+            if (health.authentication?.ready !== true) failures.push("authentication is not ready");
+            if (health.authentication?.registrationEnabled !== expectRegistration) failures.push("registration flag does not match the workflow input");
+            if (expectRegistration && health.authentication?.registrationReady !== true) failures.push("registration is not ready");
+            if (health.media?.uploadsEnabled !== expectMediaUploads) failures.push("media upload flag does not match the workflow input");
+            if (health.media?.storageReady !== true) failures.push("media storage is not ready");
+            if (health.media?.transformationsReady !== true) failures.push("Cloudflare Images binding is not ready");
+            if (health.media?.derivativePolicyVersion !== "recipe-images-v1") failures.push("unexpected media derivative policy");
+            if (health.media?.originalPublicDelivery !== false) failures.push("private originals could be publicly delivered");
+            if (health.media?.publicDeliveryRequiresApproval !== true) failures.push("media approval delivery gate is unavailable");
+            if (health.media?.publicDeliveryRequiresReadyDerivatives !== true) failures.push("ready derivative delivery gate is unavailable");
+            if (health.media?.orientationNormalization !== true) failures.push("orientation normalization capability is unavailable");
+            if (health.media?.metadataStrippingVerified !== true) failures.push("metadata stripping verification is unavailable");
+            if (health.media?.idempotentLocks !== true) failures.push("derivative generation locks are unavailable");
+            if (health.media?.checksumRegeneration !== true) failures.push("checksum regeneration capability is unavailable");
+            if (health.media?.cleanupLifecycle !== true) failures.push("media cleanup lifecycle is unavailable");
+            if (!Array.isArray(health.media?.requiredFormats) || !health.media.requiredFormats.includes("jpeg") || !health.media.requiredFormats.includes("webp")) failures.push("required JPEG/WebP fallback matrix is unavailable");
+            if (expectMediaUploads && health.media?.ready !== true) failures.push("media uploads are not ready");
+            if (health.recipeSubmissions?.enabled !== expectRecipeSubmissions) failures.push("recipe submission flag does not match the workflow input");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.ready !== true) failures.push("recipe submissions are not ready");
+            if (expectRecipeSubmissions && expectMediaUploads !== true) failures.push("recipe submissions were requested without media uploads");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.contributorRevisions !== true) failures.push("contributor recipe revisions are not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.requestedChanges !== true) failures.push("editor requested changes are not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.immutableSnapshots !== true) failures.push("immutable recipe snapshots are not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.optimisticLocking !== true) failures.push("recipe optimistic locking is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.scheduledPublishing !== true) failures.push("scheduled publishing is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.guardedScheduleProcessor !== true) failures.push("guarded schedule processor is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.archiveRestore !== true) failures.push("archive restoration is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.scheduledRevisionGuard !== true) failures.push("schedule revision guard is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.scheduledMediaRevalidation !== true) failures.push("scheduled media revalidation is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.scheduledAtomicPromotion !== true) failures.push("scheduled atomic promotion is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.publishedChangeSets !== true) failures.push("published recipe private change sets are not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.oneActivePublishedChangeSet !== true) failures.push("one-active-change-set guard is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.privatePublishedChangeSetSnapshots !== true) failures.push("private published change-set snapshots are not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.publishedChangeSetOptimisticLocking !== true) failures.push("published change-set optimistic locking is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.publishedChangeSetBaseGuard !== true) failures.push("published change-set base revision guard is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.publishedChangeSetMediaReservation !== true) failures.push("published change-set media reservation is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.publishedChangeSetApprovalMediaRevalidation !== true) failures.push("published change-set approval media revalidation is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.publishedChangeSetAtomicPromotion !== true) failures.push("published change-set atomic promotion is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.publishedChangeSetAuditEvents !== true) failures.push("published change-set audit events are not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.editorAuthoredPublishedChangeSets !== true) failures.push("editor-authored published change sets are not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.historicalSnapshotRestore !== true) failures.push("historical recipe snapshot restore is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.editorChangeSetOriginAudit !== true) failures.push("editor change-set origin audit is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.editorChangeSetContributorDraftLock !== true) failures.push("editor change-set contributor draft lock is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.editorChangeSetCurrentLiveBaseline !== true) failures.push("editor change-set current live baseline is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.historicalSnapshotMediaFallback !== true) failures.push("historical snapshot media fallback is not available");
+            if (expectRecipeSubmissions && health.recipeSubmissions?.editorChangeSetSharedAtomicApproval !== true) failures.push("editor change-set shared atomic approval is not available");
+            if (health.recipeSubmissions?.automaticScheduleCronConfigured !== false) failures.push("automatic schedule cron must remain disabled until separately reviewed");
+            if (failures.length) {
+              console.error(failures.join("\n"));
+              process.exit(1);
+            }
+          '
+          echo "Account, media, and recipe deployment completed and verified: $DEPLOYMENT_URL"
+
+      - name: Remove ephemeral secret files
+        if: always()
+        run: rm -f .auth-secrets.json .wrangler.auth.json

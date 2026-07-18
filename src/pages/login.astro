@@ -1,0 +1,99 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import {
+  CSRF_COOKIE,
+  createCsrfToken,
+  createRandomToken,
+  getCsrfCookieOptions,
+  safeNextPath,
+} from "../lib/auth";
+import { getAuthRuntimeStatus } from "../lib/auth/runtime";
+
+if (Astro.locals.user) {
+  return Astro.redirect("/account", 302);
+}
+
+const readiness = getAuthRuntimeStatus();
+const next = safeNextPath(Astro.url.searchParams.get("next"));
+const errorCode = Astro.url.searchParams.get("error") ?? "";
+const verified = Astro.url.searchParams.get("verified") === "1";
+const errorMessages: Record<string, string> = {
+  invalid: "The email address or password was not accepted. Unverified accounts must confirm their email before signing in.",
+  challenge: "The security challenge could not be verified. Please try again.",
+  rate: "Too many sign-in attempts. Please wait before trying again.",
+  request: "The sign-in request expired or was invalid. Please reload the page.",
+  unavailable: "Account sign-in is not available until the required Cloudflare services and secrets are configured.",
+};
+
+let csrfToken = "";
+if (readiness.ready) {
+  let nonce = Astro.cookies.get(CSRF_COOKIE)?.value;
+  if (!nonce) {
+    nonce = createRandomToken(18);
+    Astro.cookies.set(CSRF_COOKIE, nonce, getCsrfCookieOptions(Astro.request));
+  }
+  csrfToken = await createCsrfToken("login", nonce);
+}
+---
+
+<BaseLayout
+  title="Sign In — Ozzyl Recipes"
+  description="Sign in securely to your Ozzyl Recipes account."
+  robots="noindex,nofollow"
+>
+  <section class="section">
+    <div class="container auth-shell">
+      <div class="auth-card">
+        <p class="eyebrow">Member accounts</p>
+        <h1 class="section-title">Sign in securely</h1>
+        <p class="section-copy">Your session is stored in an HTTP-only cookie and backed by Cloudflare KV. D1 remains the source of truth for account status and session revocation.</p>
+
+        {verified && (
+          <div class="auth-alert auth-alert--success" role="status">Your email address has been verified. You can now sign in.</div>
+        )}
+
+        {errorMessages[errorCode] && (
+          <div class="auth-alert auth-alert--error" role="alert">{errorMessages[errorCode]}</div>
+        )}
+
+        {!readiness.ready ? (
+          <div class="auth-alert" role="status">
+            <strong>Account services are safely disabled.</strong>
+            <p>Sign-in remains closed until these future D1 production dependencies are connected:</p>
+            <ul class="auth-missing">
+              {readiness.missing.map((item) => <li><code>{item}</code></li>)}
+            </ul>
+          </div>
+        ) : (
+          <form class="auth-form" action="/api/auth/login" method="post">
+            <input type="hidden" name="csrfToken" value={csrfToken} />
+            <input type="hidden" name="next" value={next} />
+
+            <div class="auth-field">
+              <label for="login-email">Email address</label>
+              <input id="login-email" name="email" type="email" autocomplete="email" inputmode="email" maxlength="254" required />
+            </div>
+
+            <div class="auth-field">
+              <label for="login-password">Password</label>
+              <input id="login-password" name="password" type="password" autocomplete="current-password" minlength="12" maxlength="128" required />
+            </div>
+
+            <div class="turnstile-wrap">
+              <div class="cf-turnstile" data-sitekey={readiness.siteKey} data-action="login" data-theme="light"></div>
+            </div>
+
+            <div class="auth-actions">
+              <button class="button" type="submit">Sign in</button>
+              <a class="button button--ghost" href={`/register?next=${encodeURIComponent(next)}`}>Create account</a>
+            </div>
+          </form>
+        )}
+
+        <p class="auth-meta">Public errors remain generic to prevent account discovery. Five failed password checks temporarily lock the account for 15 minutes.</p>
+      </div>
+    </div>
+  </section>
+
+  {readiness.ready && <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>}
+</BaseLayout>

@@ -1,0 +1,79 @@
+name: Deploy to Cloudflare
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: cloudflare-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Verify Cloudflare credentials
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "CLOUDFLARE_ACCOUNT_ID is not configured"; exit 1; }
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN is not configured"; exit 1; }
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate catalogue and D1 migrations
+        run: npm run validate
+
+      - name: Build D1-free production Worker
+        run: npm run build
+
+      - name: Deploy Worker and provision non-D1 bindings
+        id: deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          command: deploy --config wrangler.jsonc
+
+      - name: Verify deployed health endpoint
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment-url }}
+        run: |
+          test -n "$DEPLOYMENT_URL" || { echo "Wrangler did not return a deployment URL"; exit 1; }
+          HEALTH_JSON=$(curl --fail --silent --show-error --retry 5 --retry-delay 3 "$DEPLOYMENT_URL/api/health")
+          echo "$HEALTH_JSON"
+          HEALTH_JSON="$HEALTH_JSON" node --input-type=module -e '
+            const health = JSON.parse(process.env.HEALTH_JSON ?? "{}");
+            const failures = [];
+            if (health.ok !== true) failures.push("health.ok is not true");
+            if (health.dataMode !== "static-fallback") failures.push(`unexpected dataMode: ${health.dataMode}`);
+            if (health.catalogue?.supportedMarkets !== 10) failures.push("supported market count is not 10");
+            if (health.bindings?.d1 !== false) failures.push("D1 should not be bound in the default deployment");
+            if (health.bindings?.kv !== true) failures.push("KV binding is unavailable");
+            if (health.bindings?.r2 !== true) failures.push("R2 binding is unavailable");
+            if (health.bindings?.images !== true) failures.push("Images binding is unavailable");
+            if (failures.length) {
+              console.error(failures.join("\n"));
+              process.exit(1);
+            }
+          '
+          echo "Deployed and verified: $DEPLOYMENT_URL"

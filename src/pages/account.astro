@@ -1,0 +1,88 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import {
+  CSRF_COOKIE,
+  createCsrfToken,
+  createRandomToken,
+  getCsrfCookieOptions,
+} from "../lib/auth";
+
+const user = Astro.locals.user;
+const session = Astro.locals.session;
+if (!user || !session) {
+  return Astro.redirect("/login?next=/account", 302);
+}
+
+let nonce = Astro.cookies.get(CSRF_COOKIE)?.value;
+if (!nonce) {
+  nonce = createRandomToken(18);
+  Astro.cookies.set(CSRF_COOKIE, nonce, getCsrfCookieOptions(Astro.request));
+}
+const logoutToken = await createCsrfToken("logout", nonce);
+const locale = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" });
+const editorial = user.role === "editor" || user.role === "admin";
+---
+
+<BaseLayout
+  title="Your Account — Ozzyl Recipes"
+  description="Manage your protected Ozzyl Recipes account and session."
+  robots="noindex,nofollow"
+>
+  <section class="section">
+    <div class="container">
+      <p class="eyebrow">Member account</p>
+      <h1 class="section-title">Welcome, {user.displayName}</h1>
+      <p class="section-copy">This server-rendered page is available only after the HTTP-only session cookie is verified against Cloudflare KV and the account is confirmed active in D1.</p>
+
+      <div class="account-grid">
+        <section class="account-panel" aria-labelledby="profile-heading">
+          <h2 id="profile-heading">Profile</h2>
+          <dl>
+            <dt>Name</dt><dd>{user.displayName}</dd>
+            <dt>Email</dt><dd>{user.email}</dd>
+            <dt>Role</dt><dd>{user.role}</dd>
+            <dt>Status</dt><dd><span class="status-pill">{user.status}</span></dd>
+            <dt>Email</dt><dd><span class:list={["status-pill", { "status-pill--verified": user.emailVerified }]}>{user.emailVerified ? "Verified" : "Not verified"}</span></dd>
+            <dt>Created</dt><dd>{locale.format(new Date(user.createdAt))}</dd>
+          </dl>
+        </section>
+
+        <section class="account-panel" aria-labelledby="session-heading">
+          <h2 id="session-heading">Current session</h2>
+          <dl>
+            <dt>Created</dt><dd>{locale.format(new Date(session.createdAt))}</dd>
+            <dt>Expires</dt><dd>{locale.format(new Date(session.expiresAt))}</dd>
+            <dt>Storage</dt><dd>Cloudflare Workers KV</dd>
+            <dt>Cookie</dt><dd>HTTP-only, SameSite, Secure on HTTPS</dd>
+          </dl>
+          <form class="auth-form" action="/api/auth/logout" method="post">
+            <input type="hidden" name="csrfToken" value={logoutToken} />
+            <input type="hidden" name="sessionCsrf" value={session.csrfToken} />
+            <button class="button button--ghost" type="submit">Sign out of this session</button>
+          </form>
+        </section>
+
+        <section class="account-panel" aria-labelledby="local-heading">
+          <h2 id="local-heading">This browser</h2>
+          <p class="auth-help">Saved recipes, shopping items, and meal plans currently remain on this device. Cross-device account sync will be connected after the D1 write APIs are enabled.</p>
+          <div class="filter-actions">
+            <a class="button button--ghost" href="/saved">Saved recipes</a>
+            <a class="button button--ghost" href="/shopping-list">Shopping list</a>
+            <a class="button button--ghost" href="/meal-plan">Meal plan</a>
+          </div>
+        </section>
+
+        <section class="account-panel" aria-labelledby="publishing-heading">
+          <h2 id="publishing-heading">Contributor access</h2>
+          <p class="auth-help">The guarded editor can upload a private hero image and commit a validated recipe, taxonomy, ingredients, and directions to the D1 review queue in one transaction. Public delivery still requires separate media and recipe approval.</p>
+          <div class="filter-actions">
+            <a class="button" href="/recipes/new">Open recipe editor</a>
+            <a class="button button--ghost" href="/account/submissions">Your submissions</a>
+            {editorial && <a class="button button--ghost" href="/admin/recipes">Review recipe queue</a>}
+            {editorial && <a class="button button--ghost" href="/admin/media">Review media queue</a>}
+          </div>
+        </section>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

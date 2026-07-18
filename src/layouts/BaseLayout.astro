@@ -1,0 +1,155 @@
+---
+import "../styles/global.css";
+import "../styles/market.css";
+import "../styles/discovery.css";
+import "../styles/recipe-tools.css";
+import "../styles/editor.css";
+import "../styles/editorial.css";
+import "../styles/kitchen.css";
+import "../styles/auth.css";
+import { markets, resolveMarket } from "../lib/market";
+
+type Props = {
+  title?: string;
+  description?: string;
+  image?: string;
+  robots?: string;
+};
+
+const {
+  title = "Ozzyl Recipes — Trusted Recipes from Around the World",
+  description = "Discover dependable recipes, practical cooking guides, and regional favourites selected for your market.",
+  image = "",
+  robots = "index,follow",
+} = Astro.props;
+
+const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url.origin);
+const market = resolveMarket(Astro.request, Astro.url);
+const returnTo = `${Astro.url.pathname}${Astro.url.search}`;
+const pathname = Astro.url.pathname;
+const user = Astro.locals.user;
+const navItems = [
+  { href: "/search", label: "Recipes" },
+  { href: "/categories", label: "Categories" },
+  { href: "/meal-plan", label: "Meal plan", count: "plan" },
+  { href: "/shopping-list", label: "Shopping", count: "shopping" },
+  { href: "/saved", label: "Saved" },
+];
+const isCurrent = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="description" content={description} />
+    <meta name="robots" content={robots} />
+    <meta name="theme-color" content="#fffdf8" />
+    <meta name="geo.region" content={market.code} />
+    <link rel="canonical" href={canonical} />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/ozzyl-recipes.svg" type="image/svg+xml" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    {image && <meta property="og:image" content={image} />}
+    <meta name="twitter:card" content={image ? "summary_large_image" : "summary"} />
+    <title>{title}</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+
+    <header class="site-header">
+      <div class="container header-row">
+        <a class="brand" href="/" aria-label="Ozzyl Recipes home">
+          <span class="brand-mark">OR</span>
+          <span>Ozzyl Recipes</span>
+        </a>
+
+        <nav class="main-nav" aria-label="Main navigation">
+          {navItems.map((item) => (
+            <a href={item.href} aria-current={isCurrent(item.href) ? "page" : undefined}>
+              {item.label}
+              {item.count === "shopping" && <span class="nav-count" data-shopping-count>0</span>}
+              {item.count === "plan" && <span class="nav-count" data-plan-count>0</span>}
+            </a>
+          ))}
+        </nav>
+
+        <div class="nav-actions">
+          <form class="market-form" action="/api/location" method="post">
+            <input type="hidden" name="returnTo" value={returnTo} />
+            <label class="sr-only" for="market-select">Recipe market</label>
+            <select id="market-select" name="country" aria-label="Recipe market">
+              {markets.map((option) => (
+                <option value={option.code} selected={option.code === market.code}>{option.name}</option>
+              ))}
+            </select>
+            <button class="market-apply" type="submit">Apply</button>
+          </form>
+          {user ? (
+            <a class="button button--ghost" href="/account" aria-current={isCurrent("/account") ? "page" : undefined}>
+              {user.displayName}
+            </a>
+          ) : (
+            <a class="button button--ghost" href={`/login?next=${encodeURIComponent(returnTo)}`}>Sign in</a>
+          )}
+          <a class="button" href="/recipes/new">Add recipe</a>
+        </div>
+
+        <details class="mobile-menu">
+          <summary aria-label="Open navigation menu">Menu</summary>
+          <div class="mobile-menu__panel">
+            <nav aria-label="Mobile navigation">
+              {navItems.map((item) => (
+                <a href={item.href} aria-current={isCurrent(item.href) ? "page" : undefined}>
+                  {item.label}
+                  {item.count === "shopping" && <span class="nav-count" data-shopping-count>0</span>}
+                  {item.count === "plan" && <span class="nav-count" data-plan-count>0</span>}
+                </a>
+              ))}
+            </nav>
+            <a href="/markets">Markets</a>
+            <div class="mobile-menu__actions">
+              {user ? (
+                <a class="button button--ghost" href="/account">Account</a>
+              ) : (
+                <a class="button button--ghost" href={`/login?next=${encodeURIComponent(returnTo)}`}>Sign in</a>
+              )}
+              <a class="button" href="/recipes/new">Add recipe</a>
+            </div>
+          </div>
+        </details>
+      </div>
+    </header>
+
+    <main id="main-content" tabindex="-1">
+      <slot />
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-row">
+        <div>
+          <a class="brand" href="/">
+            <span class="brand-mark">OR</span>
+            <span>Ozzyl Recipes</span>
+          </a>
+          <p class="footer-copy">
+            An international recipe discovery platform, personalised by market and delivered globally on Cloudflare Workers.
+          </p>
+        </div>
+        <div>
+          <strong>Explore</strong>
+          <p class="footer-copy"><a href="/search">All recipes</a> · <a href="/categories">Categories</a> · <a href="/markets">Markets</a> · <a href="/meal-plan">Meal plan</a> · <a href="/shopping-list">Shopping</a> · <a href="/saved">Saved</a> · <a href="/about">About</a> · <a href="/privacy">Privacy</a></p>
+        </div>
+      </div>
+    </footer>
+
+    <script src="/scripts/kitchen-state.js" defer></script>
+    <script src="/scripts/saved-recipes.js" defer></script>
+    <script src="/scripts/recipe-submission.js" defer></script>
+    <script src="/scripts/register-sw.js" defer></script>
+  </body>
+</html>

@@ -1,0 +1,103 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import RecipeCard from "../components/RecipeCard.astro";
+import { listCategories, listRecipes } from "../lib/db";
+import { resolveMarket } from "../lib/market";
+
+const market = resolveMarket(Astro.request, Astro.url);
+const [marketRecipes, latestRecipes, categories] = await Promise.all([
+  listRecipes({ country: market.code, limit: 3 }),
+  listRecipes({ country: market.code, limit: 6 }),
+  listCategories(10),
+]);
+---
+
+<BaseLayout>
+  <section class="hero">
+    <div class="container hero-grid">
+      <div>
+        <p class="eyebrow">Recipes selected for {market.name}</p>
+        <h1>Cook something <span>worth sharing.</span></h1>
+        <p class="hero-copy">
+          Explore dependable recipes from the United States, Europe, Australia, Canada, and other leading food markets—ranked for where you cook.
+        </p>
+        <form class="search-box" action="/search" method="get">
+          <input name="q" type="search" placeholder="Search chicken, pasta, cookies..." aria-label="Search recipes" required />
+          <button class="button" type="submit">Search recipes</button>
+        </form>
+        <div class="chips" aria-label="Popular recipe categories">
+          {categories.slice(0, 6).map((category) => (
+            <a class="chip" href={`/search?q=${encodeURIComponent(category.name)}`}>{category.name}</a>
+          ))}
+        </div>
+      </div>
+      <div class="hero-art">
+        <img
+          src="https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=1400&q=84"
+          alt="A table filled with colourful dishes from around the world"
+          width="1000"
+          height="1100"
+        />
+        <div class="hero-badge">
+          <strong>Local relevance, global discovery</strong>
+          <span>See recipes prioritised for your country, then switch markets whenever you like.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--soft">
+    <div class="container">
+      <div class="feature-strip">
+        <div class="feature-item"><strong>Market-aware discovery</strong><span>Cloudflare location signals help surface relevant regional recipes first.</span></div>
+        <div class="feature-item"><strong>Useful filters</strong><span>Browse by meal, ingredient, cuisine, occasion, diet, and cooking time.</span></div>
+        <div class="feature-item"><strong>Reliable instructions</strong><span>Clear ingredients, practical timing, and repeatable step-by-step directions.</span></div>
+        <div class="feature-item"><strong>Fast worldwide</strong><span>Pages, APIs, and media run on Cloudflare's global network.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Popular in {market.name}</p>
+          <h2 class="section-title">Start with these recipes</h2>
+          <p class="section-copy">Your selected market is prioritised, while the full international catalogue remains available.</p>
+        </div>
+        <a class="text-link" href="/search">Browse everything →</a>
+      </div>
+
+      <div class="recipe-grid">
+        {marketRecipes.map((recipe) => <RecipeCard recipe={recipe} />)}
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--soft">
+    <div class="container">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">International favourites</p>
+          <h2 class="section-title">What should we cook next?</h2>
+        </div>
+      </div>
+      <div class="recipe-grid">
+        {latestRecipes.map((recipe) => <RecipeCard recipe={recipe} />)}
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container callout">
+      <div>
+        <p class="eyebrow" style="color:#ffd46a">Built for trusted contributors</p>
+        <h2 class="section-title">Share a regional recipe with an international audience.</h2>
+        <p>Country, language, measurements, ingredients, directions, timing, photos, and serving details will be managed from one editor.</p>
+      </div>
+      <div>
+        <a class="button" href="/recipes/new">Add your first recipe</a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>

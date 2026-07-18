@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate catalogue and D1 migrations
+        run: npm run validate
+
+      - name: Validate operational scripts
+        run: node --check scripts/prepare-admin-bootstrap.mjs
+
+      - name: Apply authoritative migrations locally
+        run: npm run db:migrate:local
+
+      - name: Test three-way conflict and rebase audit safeguards
+        id: conflict_acceptance
+        continue-on-error: true
+        run: npm run test:conflicts > conflict-acceptance.log 2>&1
+
+      - name: Upload conflict acceptance failure log
+        if: steps.conflict_acceptance.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: conflict-acceptance-log
+          path: conflict-acceptance.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Fail after preserving conflict acceptance diagnostics
+        if: steps.conflict_acceptance.outcome == 'failure'
+        run: |
+          cat conflict-acceptance.log
+          exit 1
+
+      - name: Test rebase request-handler and verified-session guards
+        id: rebase_route_acceptance
+        continue-on-error: true
+        run: node --experimental-transform-types --import ./scripts/register-cloudflare-test-loader.mjs scripts/test-recipe-change-set-rebase-route.mjs > rebase-route-acceptance.log 2>&1
+
+      - name: Upload rebase route acceptance failure log
+        if: steps.rebase_route_acceptance.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rebase-route-acceptance-log
+          path: rebase-route-acceptance.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Fail after preserving rebase route diagnostics
+        if: steps.rebase_route_acceptance.outcome == 'failure'
+        run: |
+          cat rebase-route-acceptance.log
+          exit 1
+
+      - name: Generate Cloudflare types and build D1-free Astro Worker
+        run: npm run build
+
+      - name: Generate Cloudflare types and build D1 Astro Worker
+        run: npm run build:d1

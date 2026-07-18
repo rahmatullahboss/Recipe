@@ -1,0 +1,78 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import {
+  CSRF_COOKIE,
+  createCsrfToken,
+  createRandomToken,
+  getAuthReadiness,
+  getCsrfCookieOptions,
+  safeNextPath,
+} from "../lib/auth";
+
+const readiness = getAuthReadiness();
+const token = Astro.url.searchParams.get("token")?.trim() ?? "";
+const sent = Astro.url.searchParams.get("sent") === "1";
+const next = safeNextPath(Astro.url.searchParams.get("next"));
+const error = Astro.url.searchParams.get("error") ?? "";
+const messages: Record<string, string> = {
+  request: "The confirmation request expired. Open the verification link again.",
+  invalid: "This verification link is invalid, expired, or has already been used.",
+  unavailable: "Email verification is temporarily unavailable.",
+};
+
+let csrfToken = "";
+if (token && readiness.enabled && readiness.database && readiness.passwordPepper) {
+  let nonce = Astro.cookies.get(CSRF_COOKIE)?.value;
+  if (!nonce) {
+    nonce = createRandomToken(18);
+    Astro.cookies.set(CSRF_COOKIE, nonce, getCsrfCookieOptions(Astro.request));
+  }
+  csrfToken = await createCsrfToken("verify-email", nonce);
+}
+---
+
+<BaseLayout
+  title="Verify Email — Ozzyl Recipes"
+  description="Confirm an Ozzyl Recipes account email address."
+  robots="noindex,nofollow"
+>
+  <section class="section">
+    <div class="container auth-shell">
+      <div class="auth-card">
+        <p class="eyebrow">Email verification</p>
+        <h1 class="section-title">Confirm your email</h1>
+        <p class="section-copy">Verification links are single-use and expire after 30 minutes. Only a SHA-256 digest of the token is stored in D1.</p>
+
+        {sent && (
+          <div class="auth-alert auth-alert--success" role="status">
+            <strong>Check your inbox.</strong>
+            <p>Your account remains pending and no authenticated session exists until the email address is verified.</p>
+          </div>
+        )}
+
+        {messages[error] && <div class="auth-alert auth-alert--error" role="alert">{messages[error]}</div>}
+
+        {token && readiness.enabled && readiness.database && readiness.passwordPepper ? (
+          <form class="auth-form" action="/api/auth/verify-email" method="post">
+            <input type="hidden" name="token" value={token} />
+            <input type="hidden" name="csrfToken" value={csrfToken} />
+            <input type="hidden" name="next" value={next} />
+            <div class="auth-actions">
+              <button class="button" type="submit">Verify email address</button>
+              <a class="button button--ghost" href={`/login?next=${encodeURIComponent(next)}`}>Return to sign in</a>
+            </div>
+          </form>
+        ) : sent ? (
+          <div class="auth-actions" style="margin-top:22px">
+            <a class="button button--ghost" href={`/login?next=${encodeURIComponent(next)}`}>Return to sign in</a>
+          </div>
+        ) : (
+          <div class="auth-alert" role="status">
+            <strong>No usable verification token was found.</strong>
+            <p>Open the complete verification link from the email. Registration and email delivery remain disabled until the D1 production environment is configured.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  </section>
+</BaseLayout>

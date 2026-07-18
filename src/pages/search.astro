@@ -1,0 +1,145 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import RecipeCard from "../components/RecipeCard.astro";
+import {
+  listCategories,
+  listRecipes,
+  type RecipeDifficulty,
+  type RecipeSort,
+} from "../lib/db";
+import { markets, resolveMarket } from "../lib/market";
+
+const query = Astro.url.searchParams.get("q")?.trim() ?? "";
+const category = Astro.url.searchParams.get("category")?.trim().toLowerCase() ?? "";
+const requestedDifficulty = Astro.url.searchParams.get("difficulty")?.trim().toLowerCase() ?? "";
+const difficulty = ["easy", "medium", "hard"].includes(requestedDifficulty)
+  ? requestedDifficulty as RecipeDifficulty
+  : undefined;
+const requestedSort = Astro.url.searchParams.get("sort")?.trim().toLowerCase() ?? "recommended";
+const sort = ["recommended", "rating", "quickest", "popular"].includes(requestedSort)
+  ? requestedSort as RecipeSort
+  : "recommended";
+const requestedMaxTime = Number.parseInt(Astro.url.searchParams.get("maxTime") ?? "", 10);
+const maxTotalMinutes = Number.isFinite(requestedMaxTime) && requestedMaxTime > 0
+  ? requestedMaxTime
+  : undefined;
+const market = resolveMarket(Astro.request, Astro.url);
+const [recipes, categories] = await Promise.all([
+  listRecipes({
+    search: query || undefined,
+    country: market.code,
+    category: category || undefined,
+    difficulty,
+    maxTotalMinutes,
+    sort,
+    limit: 48,
+  }),
+  listCategories(100),
+]);
+const hasFilters = Boolean(query || category || difficulty || maxTotalMinutes || sort !== "recommended" || Astro.url.searchParams.has("country"));
+const title = query
+  ? `Search results for “${query}” — Ozzyl Recipes`
+  : "Browse International Recipes — Ozzyl Recipes";
+---
+
+<BaseLayout title={title} description={`Search international recipes with results prioritised for ${market.name}.`}>
+  <section class="section recipe-finder-section">
+    <div class="container">
+      <p class="eyebrow">Recipe finder · {market.name}</p>
+      <h1 class="section-title">{query ? `Results for “${query}”` : "Browse international recipes"}</h1>
+      <p class="section-copy">Combine country, cuisine, difficulty, cooking time, and ranking filters. Your selected market remains the first priority.</p>
+
+      <form class="filter-panel" action="/search" method="get">
+        <div class="filter-panel__search">
+          <label for="recipe-query">Search recipes</label>
+          <input
+            id="recipe-query"
+            name="q"
+            type="search"
+            value={query}
+            placeholder="Chicken, pasta, cookies, French..."
+          />
+        </div>
+
+        <div class="filter-grid">
+          <label class="filter-field">
+            <span>Market</span>
+            <select name="country">
+              {markets.map((option) => (
+                <option value={option.code} selected={option.code === market.code}>{option.name}</option>
+              ))}
+            </select>
+          </label>
+
+          <label class="filter-field">
+            <span>Category or cuisine</span>
+            <select name="category">
+              <option value="">All categories</option>
+              {categories.map((item) => (
+                <option value={item.slug} selected={item.slug === category}>{item.name}</option>
+              ))}
+            </select>
+          </label>
+
+          <label class="filter-field">
+            <span>Difficulty</span>
+            <select name="difficulty">
+              <option value="">Any difficulty</option>
+              <option value="easy" selected={difficulty === "easy"}>Easy</option>
+              <option value="medium" selected={difficulty === "medium"}>Medium</option>
+              <option value="hard" selected={difficulty === "hard"}>Hard</option>
+            </select>
+          </label>
+
+          <label class="filter-field">
+            <span>Total time</span>
+            <select name="maxTime">
+              <option value="">Any duration</option>
+              <option value="15" selected={maxTotalMinutes === 15}>15 minutes or less</option>
+              <option value="30" selected={maxTotalMinutes === 30}>30 minutes or less</option>
+              <option value="45" selected={maxTotalMinutes === 45}>45 minutes or less</option>
+              <option value="60" selected={maxTotalMinutes === 60}>1 hour or less</option>
+              <option value="90" selected={maxTotalMinutes === 90}>90 minutes or less</option>
+              <option value="120" selected={maxTotalMinutes === 120}>2 hours or less</option>
+            </select>
+          </label>
+
+          <label class="filter-field">
+            <span>Sort by</span>
+            <select name="sort">
+              <option value="recommended" selected={sort === "recommended"}>Recommended</option>
+              <option value="rating" selected={sort === "rating"}>Highest rated</option>
+              <option value="quickest" selected={sort === "quickest"}>Quickest first</option>
+              <option value="popular" selected={sort === "popular"}>Most popular</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="filter-actions">
+          <button class="button" type="submit">Show recipes</button>
+          {hasFilters && <a class="button button--ghost" href="/search">Clear filters</a>}
+        </div>
+      </form>
+
+      <div class="results-heading">
+        <div>
+          <p class="eyebrow">{recipes.length} {recipes.length === 1 ? "recipe" : "recipes"}</p>
+          <h2>{category ? categories.find((item) => item.slug === category)?.name ?? "Filtered recipes" : "Recipe results"}</h2>
+        </div>
+        <a class="text-link" href="/markets">Browse by market →</a>
+      </div>
+
+      {recipes.length > 0 ? (
+        <div class="recipe-grid">
+          {recipes.map((recipe) => <RecipeCard recipe={recipe} />)}
+        </div>
+      ) : (
+        <div class="empty-state">
+          <h2>No recipes match these filters</h2>
+          <p>Remove one filter, increase the cooking time, or try a broader ingredient or cuisine.</p>
+          <a class="button" href="/search">Reset recipe finder</a>
+        </div>
+      )}
+    </div>
+  </section>
+</BaseLayout>

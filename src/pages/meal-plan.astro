@@ -1,0 +1,52 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { listRecipes } from "../lib/db";
+import { resolveMarket } from "../lib/market";
+
+const market = resolveMarket(Astro.request, Astro.url);
+const recipes = await listRecipes({ country: market.code, limit: 48, sort: "recommended" });
+const catalogueJson = JSON.stringify(recipes.map((recipe) => ({
+  slug: recipe.slug,
+  title: recipe.title,
+  image: recipe.image_url ?? "/images/recipe-placeholder.svg",
+  minutes: recipe.prep_minutes + recipe.cook_minutes,
+  servings: recipe.servings,
+  countryCode: recipe.country_code,
+}))).replace(/</g, "\\u003c");
+---
+
+<BaseLayout
+  title="Weekly Meal Planner — Ozzyl Recipes"
+  description="Plan seven days of international recipes in a private browser calendar."
+  robots="noindex,nofollow"
+>
+  <section class="section">
+    <div class="container kitchen-shell" data-meal-plan-page>
+      <div class="meal-plan-header">
+        <div>
+          <p class="eyebrow">Private browser tool · {market.name}</p>
+          <h1 class="section-title">Weekly meal planner</h1>
+          <p class="section-copy">Choose one recipe per day. Your plan stays in this browser until account sync is introduced.</p>
+        </div>
+        <div class="week-controls" aria-label="Week navigation">
+          <button class="button button--ghost" type="button" data-previous-week>Previous</button>
+          <button class="button button--ghost" type="button" data-current-week>This week</button>
+          <button class="button button--ghost" type="button" data-next-week>Next</button>
+        </div>
+      </div>
+
+      <div class="kitchen-toolbar">
+        <p class="kitchen-status" aria-live="polite" data-plan-status>Meal plan is loading…</p>
+        <div class="kitchen-toolbar__actions">
+          <button class="button button--ghost" type="button" data-copy-plan>Copy week</button>
+          <button class="button" type="button" data-clear-plan>Clear plan</button>
+        </div>
+      </div>
+
+      <div class="meal-plan-grid" data-meal-plan-grid></div>
+    </div>
+  </section>
+
+  <script id="meal-catalogue" type="application/json" set:html={catalogueJson}></script>
+  <script src="/scripts/kitchen-pages.js" defer></script>
+</BaseLayout>

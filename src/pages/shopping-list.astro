@@ -1,0 +1,38 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Shopping List — Ozzyl Recipes"
+  description="Build a private browser shopping list from recipe ingredients."
+  robots="noindex,nofollow"
+>
+  <section class="section">
+    <div class="container kitchen-shell" data-shopping-page>
+      <div>
+        <p class="eyebrow">Private browser tool</p>
+        <h1 class="section-title">Shopping list</h1>
+        <p class="section-copy">Add ingredients directly from any recipe. This list stays in this browser and is not sent to the server.</p>
+      </div>
+
+      <div class="kitchen-toolbar">
+        <p class="kitchen-status" aria-live="polite" data-shopping-status>Your shopping list is loading…</p>
+        <div class="kitchen-toolbar__actions">
+          <button class="button button--ghost" type="button" data-copy-shopping>Copy list</button>
+          <button class="button button--ghost" type="button" data-clear-checked>Clear checked</button>
+          <button class="button" type="button" data-clear-shopping>Clear all</button>
+        </div>
+      </div>
+
+      <div class="empty-state" data-shopping-empty hidden>
+        <h2>Your list is empty</h2>
+        <p>Add ingredients from a recipe, then return here while shopping.</p>
+        <a class="button" href="/search">Find a recipe</a>
+      </div>
+
+      <ul class="shopping-list" data-shopping-list aria-label="Shopping list"></ul>
+    </div>
+  </section>
+
+  <script src="/scripts/kitchen-pages.js" defer></script>
+</BaseLayout>

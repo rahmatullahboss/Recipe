@@ -1,0 +1,158 @@
+---
+import BaseLayout from "../../../../layouts/BaseLayout.astro";
+import { CSRF_COOKIE, createCsrfToken, createRandomToken, getCsrfCookieOptions } from "../../../../lib/auth";
+import { getRecipeChangeSetConflictContext } from "../../../../lib/recipe-change-set-conflicts";
+
+const changeSetId = Astro.params.id ?? "";
+if (!Astro.locals.user || !Astro.locals.session) {
+  return Astro.redirect(`/login?next=${encodeURIComponent(`/account/change-sets/${changeSetId}/conflicts`)}`, 302);
+}
+const validId = /^recipe_change_[0-9a-f-]{36}$/i.test(changeSetId);
+const context = validId
+  ? await getRecipeChangeSetConflictContext(changeSetId, {
+    id: Astro.locals.user.id,
+    role: Astro.locals.user.role,
+  })
+  : null;
+if (validId && !context) Astro.response.status = 404;
+
+const canRebase = Boolean(context?.baseStale && context?.controlMode);
+let csrfToken = "";
+if (canRebase) {
+  let nonce = Astro.cookies.get(CSRF_COOKIE)?.value;
+  if (!nonce) {
+    nonce = createRandomToken(18);
+    Astro.cookies.set(CSRF_COOKIE, nonce, getCsrfCookieOptions(Astro.request));
+  }
+  csrfToken = await createCsrfToken("recipe-change-set-rebase", nonce);
+}
+const sessionCsrf = Astro.locals.session.csrfToken;
+
+function displayValue(key: string, value: unknown): string {
+  if (key === "mediaAssetId") return value ? String(value) : "No image";
+  if (key === "categories" && Array.isArray(value)) return value.join(", ") || "None";
+  if (key === "ingredients" && Array.isArray(value)) {
+    return value.map((item: any, index) => `${index + 1}. ${[item.amount, item.unit, item.item].filter(Boolean).join(" ")}${item.note ? ` — ${item.note}` : ""}`).join("\n");
+  }
+  if (key === "steps" && Array.isArray(value)) {
+    return value.map((item: any, index) => `${index + 1}. ${item.instruction}${item.timerMinutes !== null ? ` (${item.timerMinutes} min)` : ""}`).join("\n");
+  }
+  if (typeof value === "string") return value || "Empty";
+  return String(value ?? "Empty");
+}
+
+const stateLabels: Record<string, string> = {
+  unchanged: "Unchanged",
+  proposal_only: "Proposal only",
+  live_only: "Live only",
+  same_change: "Same change",
+  conflict: "Conflict",
+};
+---
+
+<BaseLayout title="Recipe Conflict Workspace — Ozzyl Recipes" description="Compare a private recipe proposal with its baseline and current live version." robots="noindex,nofollow">
+  <section class="section section--soft">
+    <div class="container">
+      <p class="eyebrow">Three-way private comparison</p>
+      <h1 class="section-title">{context?.changeSet.title || "Recipe conflict workspace"}</h1>
+      {context && (
+        <p class="section-copy">
+          Baseline {context.changeSet.baseRecipeRevision}/{context.changeSet.baseContentRevision} · current live {context.changeSet.liveRecipeRevision}/{context.changeSet.liveContentRevision} · private change-set revision {context.changeSet.revision}
+        </p>
+      )}
+      <div class="editor-actions editor-actions--compact">
+        {context?.changeSet.slug && <a class="recipe-tool-button" href={`/recipes/${context.changeSet.slug}`}>View live recipe</a>}
+        {context && (Astro.locals.user.role === "editor" || Astro.locals.user.role === "admin")
+          ? <a class="recipe-tool-button" href={`/admin/recipe-change-sets/${changeSetId}`}>Open editorial review</a>
+          : context && <a class="recipe-tool-button" href={`/account/submissions/${context.changeSet.recipeId}/change-set`}>Back to private editor</a>}
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div
+      class="container moderation-shell"
+      data-recipe-conflict-workspace
+      data-change-set-id={changeSetId}
+      data-revision={context?.changeSet.revision ?? ""}
+      data-control-mode={context?.controlMode ?? ""}
+      data-csrf={csrfToken}
+      data-session-csrf={sessionCsrf}
+    >
+      {!context ? (
+        <div class="moderation-empty"><h2>Conflict workspace unavailable</h2><p>This private change set was not found or is not available to your account.</p></div>
+      ) : (
+        <>
+          {!context.baseStale ? (
+            <div class="auth-alert"><strong>The proposal already uses the current live baseline.</strong><p>No rebase is required. The comparison below still shows what the private proposal changes.</p></div>
+          ) : context.changeSet.liveStatus !== "published" ? (
+            <div class="auth-alert auth-alert--error"><strong>Rebase blocked.</strong><p>The live recipe is no longer published. Private conflict assistance never changes recipe status.</p></div>
+          ) : (
+            <div class="auth-alert auth-alert--error">
+              <strong>The live recipe changed after this proposal started.</strong>
+              <p>Approval and normal saving remain blocked. Review every conflicting unit and explicitly choose the live or proposed value before rebasing the private proposal.</p>
+            </div>
+          )}
+
+          <div class="editorial-review__grid">
+            <article class="editor-section"><p class="eyebrow">Proposal-only</p><h2>{context.comparison.summary.proposalOnly}</h2><p>Automatically carried into the rebased private proposal.</p></article>
+            <article class="editor-section"><p class="eyebrow">Live-only</p><h2>{context.comparison.summary.liveOnly}</h2><p>The latest live value is kept automatically.</p></article>
+            <article class="editor-section"><p class="eyebrow">Same change</p><h2>{context.comparison.summary.sameChange}</h2><p>Both sides reached the same value.</p></article>
+            <article class="editor-section"><p class="eyebrow">Conflicts</p><h2>{context.comparison.summary.conflicts}</h2><p>Each requires an explicit live or proposed choice.</p></article>
+          </div>
+
+          <div class="submission-list">
+            {context.comparison.units.map((unit) => (
+              <article class="submission-card" data-conflict-unit data-conflict-key={unit.key} data-conflict-state={unit.state}>
+                <div class="editor-section__heading">
+                  <div><p class="eyebrow">{stateLabels[unit.state]}</p><h2>{unit.label}</h2></div>
+                  <span class="editor-status" data-state={unit.state === "conflict" ? "error" : unit.state === "proposal_only" ? "success" : "neutral"}>{unit.state.replace("_", " ")}</span>
+                </div>
+                <div class="editorial-review__grid">
+                  <section><h3>Stored baseline</h3><pre class="conflict-value">{displayValue(unit.key, unit.baseline)}</pre></section>
+                  <section><h3>Current live</h3><pre class="conflict-value">{displayValue(unit.key, unit.live)}</pre></section>
+                  <section><h3>Private proposal</h3><pre class="conflict-value">{displayValue(unit.key, unit.proposed)}</pre></section>
+                </div>
+                {unit.state === "conflict" && context.baseStale && context.controlMode && (
+                  <fieldset class="recipe-control-group">
+                    <legend class="recipe-control-label">Resolution for {unit.label}</legend>
+                    <label class="category-check"><input type="radio" name={`resolution-${unit.key}`} value="live" /><span>Keep current live value</span></label>
+                    <label class="category-check"><input type="radio" name={`resolution-${unit.key}`} value="proposed" /><span>Keep private proposed value</span></label>
+                  </fieldset>
+                )}
+                {unit.state === "proposal_only" && <p class="auth-help">Safe default: keep the private proposed value.</p>}
+                {unit.state === "live_only" && <p class="auth-help">Safe default: keep the current live value.</p>}
+                {unit.state === "same_change" && <p class="auth-help">Safe default: keep the identical current live value.</p>}
+              </article>
+            ))}
+          </div>
+
+          {context.baseStale && context.controlMode ? (
+            <section class="editor-section">
+              <h2>Rebase private proposal</h2>
+              <p>This operation updates only the private baseline and private proposal. It does not approve, publish, or modify the live recipe. Ingredient, direction, and category collections are treated as atomic units.</p>
+              <button class="button" type="button" data-rebase-change-set>
+                {context.comparison.summary.conflicts ? "Apply choices and rebase privately" : "Apply safe private rebase"}
+              </button>
+              <p class="moderation-result" data-rebase-result aria-live="polite"></p>
+            </section>
+          ) : context.baseStale ? (
+            <div class="auth-alert"><strong>Read-only comparison.</strong><p>{context.changeSet.status === "review" ? "An editor can request changes to hand conflict resolution back to the contributor." : "The current account does not control this private draft."}</p></div>
+          ) : null}
+
+          {context.rebases.length > 0 && (
+            <section class="editor-section">
+              <h2>Immutable rebase history</h2>
+              <ol class="editorial-events">
+                {(context.rebases as any[]).map((item) => (
+                  <li><strong>Revision {item.previous_change_set_revision} → {item.resulting_change_set_revision}</strong> by {item.actor_name} · base {item.previous_base_recipe_revision}/{item.previous_base_content_revision} → {item.resulting_base_recipe_revision}/{item.resulting_base_content_revision} · {item.conflict_count} explicit conflict choice(s)</li>
+                ))}
+              </ol>
+            </section>
+          )}
+        </>
+      )}
+    </div>
+  </section>
+  <script src="/scripts/recipe-change-set-conflicts.js" defer></script>
+</BaseLayout>
