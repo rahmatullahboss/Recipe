@@ -39,7 +39,24 @@ jobs:
         run: npm run db:migrate:local
 
       - name: Test three-way conflict and rebase audit safeguards
-        run: npm run test:conflicts
+        id: conflict_acceptance
+        continue-on-error: true
+        run: npm run test:conflicts > conflict-acceptance.log 2>&1
+
+      - name: Upload conflict acceptance failure log
+        if: steps.conflict_acceptance.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: conflict-acceptance-log
+          path: conflict-acceptance.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Fail after preserving conflict acceptance diagnostics
+        if: steps.conflict_acceptance.outcome == 'failure'
+        run: |
+          cat conflict-acceptance.log
+          exit 1
 
       - name: Generate Cloudflare types and build D1-free Astro Worker
         run: npm run build
