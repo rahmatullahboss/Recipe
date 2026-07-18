@@ -17,6 +17,7 @@ Read [`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md) for authoritative continuation c
 | Editor-authored private change sets | Complete in code | Disabled |
 | Historical snapshot restoration into private proposals | Complete in code | Disabled |
 | Three-way conflict comparison and audited private rebase | Complete in code | Disabled |
+| Local conflict comparator/D1 acceptance harness | Complete and CI-enforced | Local-only; runtime acceptance pending |
 | Community/account synchronization | Not implemented | Not available |
 
 The public product remains D1-free. Trusted writes were not activated.
@@ -140,6 +141,30 @@ Implemented behavior:
 
 See [`RECIPE_CHANGE_SET_CONFLICTS.md`](RECIPE_CHANGE_SET_CONFLICTS.md).
 
+### Executable local conflict acceptance
+
+`npm run test:conflicts` runs after all twelve local migrations in CI.
+
+It directly imports the production three-way comparator with a test-only empty Cloudflare binding and verifies:
+
+- all five conflict classifications;
+- category set equality independent of ordering;
+- atomic ingredient and direction comparisons;
+- immutable comparison snapshots;
+- fourteen unchanged units for identical drafts.
+
+It then creates random temporary local D1 fixtures and verifies:
+
+- mismatched rebase audit/private state is rejected;
+- matching revision/base/JSON state is accepted;
+- strategy, revisions, counts, and before/live/after JSON are preserved;
+- immutable audit updates are rejected and leave stored data unchanged;
+- cleanup removes all temporary fixture rows.
+
+The test script contains only Wrangler `--local` commands. Failure logs are uploaded as a three-day `conflict-acceptance-log` artifact before CI fails.
+
+This does not replace Worker/KV/R2/Images runtime acceptance. See [`LOCAL_CONFLICT_ACCEPTANCE.md`](LOCAL_CONFLICT_ACCEPTANCE.md).
+
 ## Authoritative migrations
 
 ```text
@@ -172,23 +197,25 @@ No D1 activation, account provisioning, upload, real moderation, recipe creation
 
 ## Validation baseline
 
-Implementation head:
+Acceptance harness head:
 
 ```text
-b2a249a903b66164f36f9ccde0894c77b088e457
+9ca7fbb5c7896dcafa0ae796e0a14da062c8807f
 ```
 
-GitHub Actions CI run `#374` passed:
+GitHub Actions CI run `#390` passed:
 
 - checkout and Node.js 24 setup;
 - locked dependency installation;
 - catalogue/security/conflict validator;
 - operational script validation;
 - all twelve migrations on fresh local D1 state;
+- production comparator acceptance fixtures;
+- local D1 rebase-audit mismatch and immutability checks;
 - D1-free Worker build;
 - D1 Worker build.
 
-Documentation and navigation commits may move the current branch head. Always fetch PR `#1` before continuing.
+Documentation commits may move the current branch head. Always fetch PR `#1` before continuing.
 
 ## Important routes
 
@@ -206,9 +233,10 @@ Documentation and navigation commits may move the current branch head. Always fe
 
 ## Remaining work
 
-1. Execute controlled non-production acceptance for all account/media/derivative/submission/revision/schedule/archive/contributor-editor-change-set/historical-restore/private-rebase/concurrency/rollback cases.
-2. Add optional Cloudflare Cron/queue execution only after manual processor acceptance and incident procedures.
-3. Approve legal, retention, moderation, verification-email, deletion, and incident operations.
-4. Add synchronized saves, shopping lists, meal plans, ratings, reviews, comments, and collections.
-5. Add password reset, email change, account deletion, and administration interfaces.
-6. Add taxonomy/localization/nutrition administration, search indexing, recommendations, analytics, and advertising controls.
+1. Execute controlled non-production Worker/KV/R2/Images acceptance for all account/media/derivative/submission/revision/schedule/archive/contributor-editor-change-set/historical-restore/private-rebase/concurrency/rollback cases.
+2. Review and extend protected activation checks for conflict-assistance health fields.
+3. Add optional Cloudflare Cron/queue execution only after manual processor acceptance and incident procedures.
+4. Approve legal, retention, moderation, verification-email, deletion, and incident operations.
+5. Add synchronized saves, shopping lists, meal plans, ratings, reviews, comments, and collections.
+6. Add password reset, email change, account deletion, and administration interfaces.
+7. Add taxonomy/localization/nutrition administration, search indexing, recommendations, analytics, and advertising controls.
