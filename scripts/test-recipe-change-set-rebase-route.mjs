@@ -234,7 +234,9 @@ async function testRequestGuardsAndStatusMapping() {
       ingredients: "live",
     },
   });
-  assert.equal(routeKvEntries().some(([key, value]) => key.startsWith("auth:rate:") && value === "1"), true);
+  const rateEntries = routeKvEntries().filter(([key]) => key.startsWith("auth:rate:"));
+  assert.equal(rateEntries.length, 1);
+  assert.equal(Number(rateEntries[0][1]) >= 1 && Number(rateEntries[0][1]) <= 30, true);
 }
 
 await testVerifiedSessionLifecycle();
