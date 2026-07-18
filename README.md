@@ -121,7 +121,9 @@ Each scalar/media/collection unit is classified as unchanged, proposal-only, liv
 
 Categories, ingredients, and directions are atomic units; the system does not perform unsafe item-level list merging. A guarded D1 batch updates only private baseline/proposal state and inserts immutable before/live/after audit snapshots. Rebase never approves or changes public content, and stale approval remains blocked until the rebased proposal returns through independent review.
 
-See [`docs/RECIPE_CHANGE_SET_CONFLICTS.md`](docs/RECIPE_CHANGE_SET_CONFLICTS.md).
+The local acceptance command imports the production comparator and exercises deterministic classifications plus the migrated D1 rebase-audit mismatch and immutability triggers. It uses only local Wrangler state and synthetic temporary rows.
+
+See [`docs/RECIPE_CHANGE_SET_CONFLICTS.md`](docs/RECIPE_CHANGE_SET_CONFLICTS.md) and [`docs/LOCAL_CONFLICT_ACCEPTANCE.md`](docs/LOCAL_CONFLICT_ACCEPTANCE.md).
 
 ## Cloudflare architecture
 
@@ -172,9 +174,12 @@ npm ci
 npm run validate
 npm run dev
 npm run db:migrate:local
+npm run test:conflicts
 npm run build
 npm run build:d1
 ```
+
+`npm run test:conflicts` requires the local migrations first. It never uses `--remote` D1 access.
 
 Keep all trusted-write flags false unless a deliberate controlled activation procedure is being executed.
 
@@ -223,7 +228,8 @@ Private account, contributor, admin, media-write, recipe-write, change-set, hist
 
 ## Guarded workflows
 
-- CI validates the catalogue, twelve migrations, security invariants, browser scripts, fresh local migration chain, and both Worker builds.
+- CI validates the catalogue, twelve migrations, security invariants, browser scripts, fresh local migration chain, production comparator conflict fixtures, local D1 rebase-audit triggers, and both Worker builds.
+- Failed conflict acceptance uploads a three-day `conflict-acceptance-log` artifact before CI fails; successful runs create no artifact.
 - D1-free deployment occurs from `main` only.
 - D1 provisioning requires exact `ENABLE_D1` confirmation while trusted writes remain disabled.
 - Authentication activation requires exact `ENABLE_AUTH` and independently controls registration, media, and recipe writes.
@@ -246,15 +252,17 @@ Private account, contributor, admin, media-write, recipe-write, change-set, hist
 - [`docs/PUBLISHED_RECIPE_CHANGE_SETS.md`](docs/PUBLISHED_RECIPE_CHANGE_SETS.md)
 - [`docs/EDITOR_RECIPE_CHANGE_SETS.md`](docs/EDITOR_RECIPE_CHANGE_SETS.md)
 - [`docs/RECIPE_CHANGE_SET_CONFLICTS.md`](docs/RECIPE_CHANGE_SET_CONFLICTS.md)
+- [`docs/LOCAL_CONFLICT_ACCEPTANCE.md`](docs/LOCAL_CONFLICT_ACCEPTANCE.md)
 
 ## Validation baseline
 
-Implementation head `b2a249a903b66164f36f9ccde0894c77b088e457` passed GitHub Actions CI run `#374`, including locked dependency installation, conflict/security validation, all twelve fresh local D1 migrations, operational-script validation, D1-free Worker build, and D1 Worker build. Documentation commits may move the branch head; always recheck PR `#1` before continuing.
+Acceptance harness head `9ca7fbb5c7896dcafa0ae796e0a14da062c8807f` passed GitHub Actions CI run `#390`, including locked dependency installation, conflict/security validation, all twelve fresh local D1 migrations, production comparator fixtures, local D1 rebase-audit mismatch/immutability checks, D1-free Worker build, and D1 Worker build. Documentation commits may move the branch head; always recheck PR `#1` before continuing.
 
 ## Remaining phases
 
-1. Execute controlled non-production runtime acceptance for account, media, derivatives, submissions, correction, scheduling, archive/restore, contributor/editor change sets, historical restoration, private rebases, concurrency, and rollback.
-2. Add optional Cloudflare Cron/queue scheduling only after manual processor acceptance and incident procedures.
-3. Approve legal, retention, moderation, incident, and verification-email operations.
-4. Add synchronized kitchen/community features and account lifecycle interfaces.
-5. Add nutrition/taxonomy/localization administration, search indexing, recommendations, analytics, and advertising controls.
+1. Execute controlled non-production Worker/KV/R2/Images runtime acceptance for accounts, media, derivatives, submissions, correction, scheduling, archive/restore, contributor/editor change sets, historical restoration, private rebases, concurrency, and rollback.
+2. Review and extend protected activation checks for conflict-assistance health fields.
+3. Add optional Cloudflare Cron/queue scheduling only after manual processor acceptance and incident procedures.
+4. Approve legal, retention, moderation, incident, and verification-email operations.
+5. Add synchronized kitchen/community features and account lifecycle interfaces.
+6. Add nutrition/taxonomy/localization administration, search indexing, recommendations, analytics, and advertising controls.
