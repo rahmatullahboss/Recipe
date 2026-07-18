@@ -1,8 +1,13 @@
 # Local Three-Way Conflict Acceptance Harness
 
-This harness exercises published-recipe conflict safeguards without deploying a Worker, activating trusted writes, provisioning accounts, uploading media, or using production data.
+This local acceptance layer exercises published-recipe conflict safeguards without deploying a Worker, activating trusted writes, provisioning accounts, uploading media, or using production data.
 
-## Command
+It now contains two complementary suites:
+
+1. production comparator plus local D1 schema/trigger acceptance;
+2. production authentication plus rebase request-handler guard acceptance.
+
+## Comparator and D1 command
 
 Apply the authoritative local migration chain first, then run:
 
@@ -12,7 +17,7 @@ npm run db:migrate:local
 npm run test:conflicts
 ```
 
-CI runs the same acceptance command after all twelve migrations and before either Worker build.
+CI runs this suite after all twelve migrations.
 
 ## Production comparator coverage
 
@@ -46,7 +51,7 @@ The deterministic fixture verifies:
 
 ## Local D1 migration coverage
 
-The test uses Wrangler's local D1 state after the authoritative migration chain has been applied.
+The comparator/schema suite uses Wrangler's local D1 state after the authoritative migration chain has been applied.
 
 Each run generates random fixture identifiers and creates only:
 
@@ -69,6 +74,22 @@ The D1 acceptance verifies:
 
 No seed recipe or account is modified.
 
+## Rebase request-handler command
+
+Run the companion request-handler suite with:
+
+```bash
+node --experimental-transform-types \
+  --import ./scripts/register-cloudflare-test-loader.mjs \
+  scripts/test-recipe-change-set-rebase-route.mjs
+```
+
+This suite executes the production `src/lib/auth.ts` and production rebase API handler with synthetic in-memory bindings. Only the database-changing rebase service boundary is stubbed.
+
+It verifies verified-session creation and hydration, `auth_version` revocation, suspended-account invalidation, Origin/Referer checks, purpose/session CSRF, content type and size limits, identifier/JSON/revision/resolution validation, rate limiting, service status mapping, generic failure handling, exact success delegation, and `private, no-store` responses.
+
+See [`REBASE_ROUTE_ACCEPTANCE.md`](REBASE_ROUTE_ACCEPTANCE.md) for the full request-handler matrix and explicit limitations.
+
 ## CI behavior
 
 The CI order is:
@@ -77,32 +98,39 @@ The CI order is:
 project validator
 browser/operational script validation
 all twelve local D1 migrations
-three-way conflict acceptance
+three-way comparator and D1 audit acceptance
+rebase authentication/request-handler acceptance
 D1-free Worker build
 D1 Worker build
 ```
 
-If the acceptance command fails, CI stores `conflict-acceptance.log` as a short-lived artifact named:
+Comparator/schema failures upload:
 
 ```text
 conflict-acceptance-log
 ```
 
-The artifact is retained for three days and the job then fails. Successful runs do not create the artifact.
+Request-handler failures upload:
+
+```text
+rebase-route-acceptance-log
+```
+
+Both artifacts are retained for three days and the job then fails. Successful suites create no diagnostic artifact.
 
 ## What this does not prove
 
-This harness does not replace controlled runtime acceptance. It does not execute:
+These suites do not replace controlled runtime acceptance. They do not execute:
 
-- HTTP session authentication;
-- same-origin or CSRF request handling;
-- contributor/editor role resolution through a running Worker;
-- rate limits;
-- real D1 `batch()` behavior through the Worker runtime;
+- a real deployed or local Worker HTTP server;
+- contributor/editor role resolution from a real D1 account through middleware;
+- real D1 `batch()` behavior for the rebase service;
+- remote KV consistency behavior;
 - R2 originals or derivative objects;
 - Cloudflare Images transformations;
 - media checksum, moderation, or derivative regeneration against real bindings;
 - concurrent browser requests;
+- actual private rebase writes;
 - real editorial approval or publication;
 - protected activation workflows;
 - production rollback.
@@ -111,7 +139,7 @@ Those remain controlled non-production runtime tests and must use synthetic acco
 
 ## Safety boundary
 
-The test command uses local Wrangler state only. Checked-in trusted-write flags remain false:
+The comparator/schema test uses local Wrangler D1 state only. The request-handler test uses synthetic in-memory bindings and a service stub. Checked-in trusted-write flags remain false:
 
 ```text
 AUTH_ENABLED=false
@@ -120,4 +148,4 @@ MEDIA_UPLOADS_ENABLED=false
 RECIPE_SUBMISSIONS_ENABLED=false
 ```
 
-Do not point this harness at a remote D1 database. The script intentionally contains only `--local` Wrangler commands.
+Do not point either harness at remote Cloudflare resources. The comparator script intentionally contains only `--local` Wrangler commands, and the route suite has no remote bindings.
