@@ -58,6 +58,26 @@ jobs:
           cat conflict-acceptance.log
           exit 1
 
+      - name: Test rebase request-handler and verified-session guards
+        id: rebase_route_acceptance
+        continue-on-error: true
+        run: node --experimental-transform-types --import ./scripts/register-cloudflare-test-loader.mjs scripts/test-recipe-change-set-rebase-route.mjs > rebase-route-acceptance.log 2>&1
+
+      - name: Upload rebase route acceptance failure log
+        if: steps.rebase_route_acceptance.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rebase-route-acceptance-log
+          path: rebase-route-acceptance.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Fail after preserving rebase route diagnostics
+        if: steps.rebase_route_acceptance.outcome == 'failure'
+        run: |
+          cat rebase-route-acceptance.log
+          exit 1
+
       - name: Generate Cloudflare types and build D1-free Astro Worker
         run: npm run build
 
