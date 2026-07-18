@@ -1,3 +1,7 @@
 import { register } from "node:module";
 
-register("./cloudflare-test-loader.mjs", import.meta.url);
+const loader = process.env.OZZYL_TEST_LOADER === "worker-route"
+  ? "./worker-route-test-loader.mjs"
+  : "./cloudflare-test-loader.mjs";
+
+register(loader, import.meta.url);
