@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "wrangler types --config wrangler.jsonc && astro dev",
     "validate": "node --experimental-strip-types scripts/validate-project.mjs",
+    "test:conflicts": "node --experimental-strip-types --experimental-loader ./scripts/cloudflare-test-loader.mjs scripts/test-recipe-change-set-conflicts.mjs",
     "build": "wrangler types --config wrangler.jsonc && astro build",
     "build:d1": "wrangler types --config wrangler.d1.jsonc && astro build",
     "preview": "astro preview",
